@@ -669,6 +669,353 @@ document.querySelectorAll('[data-screen]').forEach(btn => {
   });
 });
 
+// =================== BOTONES DE REFRESCO ===================
+
+// Refrescar Dashboard (KPIs + tabla)
+document.getElementById('btn-refresh-dashboard').addEventListener('click', async () => {
+  if (!selectedEventId) return;
+  const btn = document.getElementById('btn-refresh-dashboard');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Actualizando...';
+  await loadDashboard(selectedEventId);
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Actualizar';
+  showToast('Dashboard actualizado', 'success');
+});
+
+// Limpiar / refrescar pantalla de Entrega
+document.getElementById('btn-refresh-entrega').addEventListener('click', () => {
+  document.getElementById('entrega-query').value = '';
+  document.getElementById('entrega-results-container').innerHTML = '';
+  showToast('Búsqueda limpiada', 'success');
+});
+
+// Limpiar / refrescar pantalla de Editar
+document.getElementById('btn-refresh-editar').addEventListener('click', () => {
+  document.getElementById('editar-query').value = '';
+  document.getElementById('editar-results-container').innerHTML = '';
+  showToast('Búsqueda limpiada', 'success');
+});
+
+// =================== IMPORTAR EXCEL / CSV ===================
+
+// Abrir modal de importación y poblar eventos
+document.getElementById('btn-import-open').addEventListener('click', async () => {
+  // Reset state
+  document.getElementById('import-result').classList.add('hidden');
+  document.getElementById('import-error').classList.add('hidden');
+  document.getElementById('import-replace-warning').classList.add('hidden');
+  document.getElementById('import-file').value = '';
+  document.getElementById('mode-merge').checked = true;
+
+  // Poblar selector de eventos
+  const sel = document.getElementById('import-evento-select');
+  sel.innerHTML = '<option value="">Cargando...</option>';
+  try {
+    const res = await fetch(`${API_BASE}/eventos`, { headers: getHeaders() });
+    const eventos = await res.json();
+    sel.innerHTML = eventos.map(e =>
+      `<option value="${e.id}" ${e.id == selectedEventId ? 'selected' : ''}>${e.nombre}</option>`
+    ).join('');
+  } catch {
+    sel.innerHTML = '<option value="">Error al cargar eventos</option>';
+  }
+
+  document.getElementById('import-modal').classList.remove('hidden');
+});
+
+// Cerrar modal de importación
+document.getElementById('btn-cancel-import').addEventListener('click', () => {
+  document.getElementById('import-modal').classList.add('hidden');
+});
+
+// Toggle advertencia según modo seleccionado
+document.querySelectorAll('input[name="import-mode"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    const warn = document.getElementById('import-replace-warning');
+    if (document.getElementById('mode-replace').checked) {
+      warn.classList.remove('hidden');
+    } else {
+      warn.classList.add('hidden');
+    }
+  });
+});
+
+// Ejecutar importación
+document.getElementById('btn-do-import').addEventListener('click', async () => {
+  const eventoId  = document.getElementById('import-evento-select').value;
+  const fileInput = document.getElementById('import-file');
+  const modo      = document.querySelector('input[name="import-mode"]:checked').value;
+  const resultBox = document.getElementById('import-result');
+  const errorBox  = document.getElementById('import-error');
+  const btn       = document.getElementById('btn-do-import');
+
+  resultBox.classList.add('hidden');
+  errorBox.classList.add('hidden');
+
+  if (!eventoId) {
+    errorBox.textContent = 'Selecciona un evento.';
+    errorBox.classList.remove('hidden');
+    return;
+  }
+  if (!fileInput.files || fileInput.files.length === 0) {
+    errorBox.textContent = 'Selecciona un archivo .xlsx o .csv.';
+    errorBox.classList.remove('hidden');
+    return;
+  }
+
+  // Confirmación extra para replace
+  if (modo === 'replace') {
+    const ok = confirm('⚠️ ATENCIÓN: Esto borrará TODOS los boletos del evento y los reemplazará con los del archivo.\n\n¿Deseas continuar?');
+    if (!ok) return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importando...';
+
+  const formData = new FormData();
+  formData.append('evento_id', eventoId);
+  formData.append('modo', modo);
+  formData.append('archivo', fileInput.files[0]);
+
+  try {
+    const res = await fetch(`${API_BASE}/tickets/importar`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` }, // NO Content-Type (multipart)
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (res.ok && data.ok) {
+      resultBox.innerHTML = `
+        <p style="color:var(--emerald);font-weight:700;margin-bottom:.4rem">
+          <i class="fa-solid fa-circle-check"></i> ${data.mensaje}
+        </p>
+        <ul style="list-style:none;padding:0;color:var(--text-muted);font-size:.82rem;line-height:1.8">
+          <li>📄 Filas en el archivo: <strong>${data.total_filas_archivo}</strong></li>
+          <li>✅ Boletos creados: <strong style="color:var(--emerald)">${data.creados}</strong></li>
+          <li>🔄 Boletos actualizados: <strong style="color:var(--cyan)">${data.actualizados}</strong></li>
+          ${data.filas_invalidas > 0 ? `<li>⚠️ Filas inválidas (sin nº boleto): <strong style="color:var(--amber)">${data.filas_invalidas}</strong></li>` : ''}
+        </ul>
+      `;
+      resultBox.classList.remove('hidden');
+      fileInput.value = '';
+
+      // Refrescar dashboard
+      if (selectedEventId) await loadDashboard(selectedEventId);
+      showToast('Importación completada', 'success');
+    } else {
+      const msg = Array.isArray(data.detail)
+        ? data.detail.map(d => d.msg).join(', ')
+        : (data.detail || 'Error desconocido al importar');
+      errorBox.textContent = msg;
+      errorBox.classList.remove('hidden');
+    }
+  } catch (err) {
+    errorBox.textContent = 'Error de conexión con el servidor.';
+    errorBox.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-upload"></i> Importar Ahora';
+  }
+});
+
+
+// Búsqueda en pantalla Editar
+document.getElementById('editar-search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const query = document.getElementById('editar-query').value.trim();
+  if (query) await searchTicketsForEdit(query);
+});
+
+async function searchTicketsForEdit(query) {
+  try {
+    const res = await fetch(`${API_BASE}/tickets/buscar?q=${encodeURIComponent(query)}`, { headers: getHeaders() });
+    if (res.ok) {
+      const tickets = await res.json();
+      renderEditResults(tickets);
+    } else {
+      showToast('Error al buscar boletos', 'error');
+    }
+  } catch (err) {
+    showToast('Error de conexión', 'error');
+  }
+}
+
+function renderEditResults(tickets) {
+  const container = document.getElementById('editar-results-container');
+  container.innerHTML = '';
+
+  if (tickets.length === 0) {
+    container.innerHTML = '<div class="alert alert-warning text-center">No se encontraron boletos con ese criterio.</div>';
+    return;
+  }
+
+  tickets.forEach(t => {
+    const card = document.createElement('div');
+    const estadoClass = `badge-${t.estado}`;
+    const entregadoBadge = t.entregado
+      ? '<span class="badge badge-entregado"><i class="fa-solid fa-check"></i> Entregado</span>'
+      : '<span class="badge badge-separado"><i class="fa-solid fa-clock"></i> Pendiente</span>';
+
+    card.className = 'glass-panel ticket-found-card';
+    card.style.marginBottom = '1rem';
+    card.innerHTML = `
+      <div class="ticket-found-header">
+        <h4>Boleto Físico <strong class="text-primary">#${t.numero_boleto}</strong></h4>
+        <div>
+          <span class="badge ${estadoClass}">${t.estado.replace('_', ' ')}</span>
+          ${entregadoBadge}
+        </div>
+      </div>
+      <div class="ticket-found-info" style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem .75rem;margin:.75rem 0;">
+        <p><strong>Comprador:</strong> ${t.nombre_alumno}</p>
+        <p><strong>Código / DNI:</strong> ${t.codigo_alumno}</p>
+        <p><strong>Recoge:</strong> ${t.nombre_recolector || t.nombre_alumno}</p>
+        <p><strong>Carrera:</strong> ${t.carrera} (${t.ciclo}°)</p>
+        <p><strong>Precio:</strong> S/ ${t.precio_unitario.toFixed(2)}</p>
+        <p><strong>Pagado:</strong> <span class="text-emerald">S/ ${t.monto_pagado.toFixed(2)}</span></p>
+        <p><strong>Pendiente:</strong> <span class="${t.monto_pendiente > 0 ? 'text-rose font-bold' : ''}">S/ ${t.monto_pendiente.toFixed(2)}</span></p>
+        <p><strong>Método:</strong> ${t.metodo_pago.toUpperCase()}</p>
+      </div>
+      <div class="ticket-found-actions">
+        <button class="btn btn-primary btn-edit-open"
+          data-id="${t.id}"
+          data-num="${t.numero_boleto}"
+          data-codigo="${t.codigo_alumno}"
+          data-nombre="${t.nombre_alumno}"
+          data-carrera="${t.carrera}"
+          data-ciclo="${t.ciclo}"
+          data-recolector="${t.nombre_recolector || ''}"
+          data-estado="${t.estado}"
+          data-precio="${t.precio_unitario}"
+          data-pagado="${t.monto_pagado}"
+          data-metodo="${t.metodo_pago}"
+          data-entregado="${t.entregado}">
+          <i class="fa-solid fa-pen-to-square"></i> Editar este Boleto
+        </button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+
+  // Listeners de abrir modal
+  document.querySelectorAll('.btn-edit-open').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const b = e.currentTarget;
+      openEditModal({
+        id:          b.dataset.id,
+        numero:      b.dataset.num,
+        codigo:      b.dataset.codigo,
+        nombre:      b.dataset.nombre,
+        carrera:     b.dataset.carrera,
+        ciclo:       b.dataset.ciclo,
+        recolector:  b.dataset.recolector,
+        estado:      b.dataset.estado,
+        precio:      b.dataset.precio,
+        pagado:      b.dataset.pagado,
+        metodo:      b.dataset.metodo,
+        entregado:   b.dataset.entregado
+      });
+    });
+  });
+}
+
+function openEditModal(data) {
+  document.getElementById('edit-ticket-id').value        = data.id;
+  document.getElementById('edit-modal-num').textContent  = `#${data.numero}`;
+  document.getElementById('edit-codigo').value           = data.codigo;
+  document.getElementById('edit-nombre').value           = data.nombre;
+  document.getElementById('edit-carrera').value          = data.carrera;
+  document.getElementById('edit-ciclo').value            = data.ciclo;
+  document.getElementById('edit-recolector').value       = data.recolector;
+  document.getElementById('edit-estado').value           = data.estado;
+  document.getElementById('edit-precio').value           = parseFloat(data.precio).toFixed(2);
+  document.getElementById('edit-monto-pagado').value     = parseFloat(data.pagado).toFixed(2);
+  document.getElementById('edit-metodo-pago').value      = data.metodo;
+  document.getElementById('edit-entregado').value        = data.entregado === 'true' ? 'true' : 'false';
+  document.getElementById('edit-error-box').classList.add('hidden');
+  document.getElementById('edit-modal').classList.remove('hidden');
+}
+
+// Cerrar modal de edición
+document.getElementById('btn-cancel-edit').addEventListener('click', () => {
+  document.getElementById('edit-modal').classList.add('hidden');
+});
+
+// Guardar cambios
+document.getElementById('btn-save-edit').addEventListener('click', async () => {
+  const ticketId = document.getElementById('edit-ticket-id').value;
+  const errorBox = document.getElementById('edit-error-box');
+  errorBox.classList.add('hidden');
+
+  const payload = {
+    codigo_alumno:    document.getElementById('edit-codigo').value.trim(),
+    nombre_alumno:    document.getElementById('edit-nombre').value.trim(),
+    carrera:          document.getElementById('edit-carrera').value.trim(),
+    ciclo:            document.getElementById('edit-ciclo').value.trim(),
+    nombre_recolector: document.getElementById('edit-recolector').value.trim(),
+    estado:           document.getElementById('edit-estado').value,
+    precio_unitario:  parseFloat(document.getElementById('edit-precio').value),
+    monto_pagado:     parseFloat(document.getElementById('edit-monto-pagado').value),
+    metodo_pago:      document.getElementById('edit-metodo-pago').value,
+    entregado:        document.getElementById('edit-entregado').value === 'true'
+  };
+
+  // Validaciones básicas
+  if (!payload.nombre_alumno) {
+    errorBox.textContent = 'El nombre del comprador no puede estar vacío.';
+    errorBox.classList.remove('hidden');
+    return;
+  }
+  if (isNaN(payload.precio_unitario) || payload.precio_unitario <= 0) {
+    errorBox.textContent = 'El precio unitario debe ser mayor a 0.';
+    errorBox.classList.remove('hidden');
+    return;
+  }
+  if (isNaN(payload.monto_pagado) || payload.monto_pagado < 0) {
+    errorBox.textContent = 'El monto pagado no puede ser negativo.';
+    errorBox.classList.remove('hidden');
+    return;
+  }
+
+  const btn = document.getElementById('btn-save-edit');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Guardando...';
+
+  try {
+    const res = await fetch(`${API_BASE}/tickets/${ticketId}`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify(payload)
+    });
+
+    if (res.ok) {
+      document.getElementById('edit-modal').classList.add('hidden');
+      showToast('¡Boleto actualizado correctamente!', 'success');
+      // Refrescar resultados con el mismo query
+      const query = document.getElementById('editar-query').value.trim();
+      if (query) await searchTicketsForEdit(query);
+      // Refrescar dashboard si está activo
+      if (selectedEventId) loadDashboard(selectedEventId);
+    } else {
+      const err = await res.json();
+      const msg = Array.isArray(err.detail)
+        ? err.detail.map(d => d.msg).join(', ')
+        : (err.detail || 'Error al guardar cambios');
+      errorBox.textContent = msg;
+      errorBox.classList.remove('hidden');
+    }
+  } catch (err) {
+    errorBox.textContent = 'Error de conexión con el servidor.';
+    errorBox.classList.remove('hidden');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Guardar Cambios';
+  }
+});
+
 // Inicialización de la app
 document.addEventListener('DOMContentLoaded', () => {
   checkAuth();

@@ -57,6 +57,9 @@
       <button class="nav-tab" data-screen="entrega">
         <i class="fa-solid fa-box-open"></i> Entrega de Polladas
       </button>
+      <button class="nav-tab" data-screen="editar">
+        <i class="fa-solid fa-pen-to-square"></i> Editar Boleto
+      </button>
     </nav>
   </header>
 
@@ -118,6 +121,12 @@
           </div>
 
           <div class="export-actions">
+            <button id="btn-refresh-dashboard" class="btn btn-refresh" title="Recargar KPIs y boletos">
+              <i class="fa-solid fa-rotate-right"></i> Actualizar
+            </button>
+            <button id="btn-import-open" class="btn btn-import">
+              <i class="fa-solid fa-file-arrow-up"></i> Importar
+            </button>
             <button id="btn-export-excel" class="btn btn-excel">
               <i class="fa-solid fa-file-excel"></i> Exportar Excel
             </button>
@@ -407,6 +416,9 @@
               <button type="submit" class="btn btn-primary btn-lg">
                 <i class="fa-solid fa-magnifying-glass"></i> Buscar
               </button>
+              <button type="button" id="btn-refresh-entrega" class="btn btn-refresh btn-lg" title="Limpiar resultados">
+                <i class="fa-solid fa-rotate-right"></i>
+              </button>
             </div>
           </form>
         </div>
@@ -417,7 +429,114 @@
       </div>
     </section>
 
+    <!-- ==================== PANTALLA 5: EDITAR BOLETO ==================== -->
+    <section id="screen-editar" class="screen-view hidden">
+      <div class="entrega-container">
+
+        <!-- Buscador -->
+        <div class="glass-panel entrega-search-card">
+          <div class="card-title">
+            <i class="fa-solid fa-pen-to-square"></i>
+            <h2>Editar Datos de un Boleto</h2>
+          </div>
+          <p class="card-subtitle">Busca por número de boleto, código de alumno, DNI o nombre del comprador / persona que recoge.</p>
+
+          <form id="editar-search-form" class="search-form mt-4">
+            <div class="input-group">
+              <input type="text" id="editar-query" class="form-control form-control-lg" placeholder="Nº Boleto, Código, DNI o Nombre..." required>
+              <button type="submit" class="btn btn-primary btn-lg">
+                <i class="fa-solid fa-magnifying-glass"></i> Buscar
+              </button>
+              <button type="button" id="btn-refresh-editar" class="btn btn-refresh btn-lg" title="Limpiar resultados">
+                <i class="fa-solid fa-rotate-right"></i>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Resultados de búsqueda para editar -->
+        <div id="editar-results-container" class="mt-6"></div>
+
+      </div>
+    </section>
+
   </main>
+
+  <!-- ==================== MODAL: IMPORTAR EXCEL/CSV ==================== -->
+  <div id="import-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-panel" style="max-width:520px;width:95%">
+      <div class="modal-header">
+        <i class="fa-solid fa-file-arrow-up modal-icon" style="color:#f59e0b"></i>
+        <h3>Importar Boletos desde Archivo</h3>
+      </div>
+      <div class="modal-body">
+
+        <p style="color:var(--text-muted);font-size:.875rem;margin-bottom:1rem">
+          Sube un archivo <strong>.xlsx</strong> o <strong>.csv</strong> con el mismo formato del reporte exportado.
+          El sistema leerá los boletos y los cargará al evento seleccionado.
+        </p>
+
+        <div class="form-group">
+          <label for="import-evento-select">Evento destino</label>
+          <select id="import-evento-select" class="form-control"></select>
+        </div>
+
+        <div class="form-group">
+          <label for="import-file">Archivo (.xlsx o .csv)</label>
+          <input type="file" id="import-file" accept=".xlsx,.xls,.csv" class="form-control"
+            style="padding:.5rem;cursor:pointer">
+        </div>
+
+        <!-- Selector de Modo -->
+        <div class="form-group">
+          <label>Modo de Importación</label>
+          <div style="display:flex;gap:.75rem;margin-top:.4rem">
+            <label class="import-mode-label" id="mode-merge-label">
+              <input type="radio" name="import-mode" id="mode-merge" value="merge" checked>
+              <span>
+                <i class="fa-solid fa-code-merge"></i>
+                <strong>Combinar</strong>
+                <small>Agrega nuevos y actualiza existentes (por nº boleto). No borra nada.</small>
+              </span>
+            </label>
+            <label class="import-mode-label" id="mode-replace-label">
+              <input type="radio" name="import-mode" id="mode-replace" value="replace">
+              <span>
+                <i class="fa-solid fa-trash-arrow-up"></i>
+                <strong>Reemplazar todo</strong>
+                <small>Borra TODOS los boletos del evento y los carga desde el archivo.</small>
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Alerta de Replace -->
+        <div id="import-replace-warning" class="hidden" style="
+          background:rgba(244,63,94,.15);border:1px solid rgba(244,63,94,.4);
+          border-radius:var(--radius-md);padding:.75rem 1rem;margin:.5rem 0;
+          color:var(--rose);font-size:.85rem;">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          <strong> Atención:</strong> Esta acción eliminará permanentemente todos los boletos
+          existentes del evento seleccionado y los reemplazará con los del archivo.
+        </div>
+
+        <!-- Resultado de la importación -->
+        <div id="import-result" class="hidden" style="
+          background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);
+          border-radius:var(--radius-md);padding:.75rem 1rem;margin:.75rem 0;
+          font-size:.875rem;">
+        </div>
+
+        <div id="import-error" class="alert alert-danger hidden" style="margin-top:.5rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-import" class="btn btn-secondary">Cerrar</button>
+        <button id="btn-do-import" class="btn btn-import">
+          <i class="fa-solid fa-upload"></i> Importar Ahora
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- ==================== MODAL: CONFIRMAR ENTREGA ==================== -->
   <div id="confirm-modal" class="modal-backdrop hidden">
@@ -463,6 +582,97 @@
     </div>
   </div>
 
+  <!-- ==================== MODAL: EDITAR BOLETO ==================== -->
+  <div id="edit-modal" class="modal-backdrop hidden">
+    <div class="modal-card glass-panel" style="max-width:560px;width:95%">
+      <div class="modal-header">
+        <i class="fa-solid fa-pen-to-square modal-icon" style="color:var(--accent-primary)"></i>
+        <h3>Editar Boleto <span id="edit-modal-num" class="text-primary"></span></h3>
+      </div>
+      <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+
+        <input type="hidden" id="edit-ticket-id">
+
+        <!-- Datos personales -->
+        <p class="section-label" style="color:var(--text-muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:.5rem 0 .25rem">Datos del Comprador</p>
+        <div class="form-group">
+          <label for="edit-codigo">Código / DNI</label>
+          <input type="text" id="edit-codigo" class="form-control">
+        </div>
+        <div class="form-group">
+          <label for="edit-nombre">Nombre Completo</label>
+          <input type="text" id="edit-nombre" class="form-control">
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="edit-carrera">Carrera / Escuela</label>
+            <input type="text" id="edit-carrera" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit-ciclo">Ciclo</label>
+            <input type="text" id="edit-ciclo" class="form-control">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="edit-recolector">Persona que Recoge (Referencial)</label>
+          <input type="text" id="edit-recolector" class="form-control">
+        </div>
+
+        <hr class="form-divider">
+
+        <!-- Datos financieros -->
+        <p class="section-label" style="color:var(--text-muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:.5rem 0 .25rem">Datos de Pago</p>
+        <div class="form-group">
+          <label for="edit-estado">Estado de Pago</label>
+          <select id="edit-estado" class="form-control">
+            <option value="pagado">Pagado (100% Cancelado)</option>
+            <option value="parcialmente_pagado">Parcialmente Pagado (Adelanto)</option>
+            <option value="separado">Separado (Sin Pago)</option>
+          </select>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="edit-precio">Precio Unitario (S/)</label>
+            <input type="number" step="0.5" min="0" id="edit-precio" class="form-control">
+          </div>
+          <div class="form-group">
+            <label for="edit-monto-pagado">Monto Pagado (S/)</label>
+            <input type="number" step="0.5" min="0" id="edit-monto-pagado" class="form-control">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="edit-metodo-pago">Método de Pago</label>
+          <select id="edit-metodo-pago" class="form-control">
+            <option value="efectivo">Efectivo</option>
+            <option value="yape">Yape</option>
+            <option value="plin">Plin</option>
+            <option value="ninguno">Ninguno (Separado)</option>
+          </select>
+        </div>
+
+        <hr class="form-divider">
+
+        <!-- Estado de entrega -->
+        <p class="section-label" style="color:var(--text-muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:.5rem 0 .25rem">Estado de Entrega</p>
+        <div class="form-group">
+          <label for="edit-entregado">¿Ya fue entregado?</label>
+          <select id="edit-entregado" class="form-control">
+            <option value="false">No entregado</option>
+            <option value="true">Sí, ya fue entregado</option>
+          </select>
+        </div>
+
+        <div id="edit-error-box" class="alert alert-danger hidden" style="margin-top:.5rem"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-edit" class="btn btn-secondary">Cancelar</button>
+        <button id="btn-save-edit" class="btn btn-primary">
+          <i class="fa-solid fa-floppy-disk"></i> Guardar Cambios
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Bottom Navigation Bar (Mobile Display Only) -->
   <nav class="mobile-nav">
     <button class="mobile-nav-item active" data-screen="dashboard">
@@ -476,6 +686,10 @@
     <button class="mobile-nav-item" data-screen="entrega">
       <i class="fa-solid fa-utensils"></i>
       <span>Entrega</span>
+    </button>
+    <button class="mobile-nav-item" data-screen="editar">
+      <i class="fa-solid fa-pen-to-square"></i>
+      <span>Editar</span>
     </button>
   </nav>
 

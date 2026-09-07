@@ -1,0 +1,20 @@
+services:
+  app:
+    build: .
+    container_name: tickets_polladas_app
+    restart: unless-stopped
+    ports:
+      - "8082:8000"
+    volumes:
+      # Volumen persistente para la base de datos SQLite
+      - tickets_data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_PATH=/app/data/sistema_tickets.db
+    command: >
+      sh -c "mkdir -p /app/data &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  tickets_data:
+    driver: local

@@ -1,5 +1,11 @@
+import sys
 import socket
 import uvicorn
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 
 def get_local_ip():
     """
@@ -29,4 +35,4 @@ if __name__ == "__main__":
     print("="*70)
     print("  Servidor ejecutándose con uvicorn (host 0.0.0.0)... Presiona Ctrl+C para detener.\n")
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)

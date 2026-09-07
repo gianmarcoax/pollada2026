@@ -310,6 +310,85 @@ body {
   color: #ffffff;
 }
 
+.btn-refresh {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--amber);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.btn-refresh:hover {
+  background: var(--amber);
+  color: #0f172a;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.35);
+}
+
+.btn-refresh:hover i {
+  animation: spin-once 0.4s ease-in-out;
+}
+
+@keyframes spin-once {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.btn-import {
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--purple);
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+.btn-import:hover {
+  background: var(--purple);
+  color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px rgba(168, 85, 247, 0.4);
+}
+
+/* Tarjetas de selección de modo de importación */
+.import-mode-label {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: var(--transition);
+  background: rgba(255,255,255,0.03);
+}
+
+.import-mode-label:hover {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+.import-mode-label input[type="radio"] {
+  margin-top: .15rem;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.import-mode-label span {
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+
+.import-mode-label small {
+  color: var(--text-muted);
+  font-size: .75rem;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.import-mode-label:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+
+
 .btn-block { width: 100%; }
 
 .btn-lg {

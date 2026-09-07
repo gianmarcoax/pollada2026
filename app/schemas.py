@@ -92,7 +92,11 @@ class TicketUpdate(BaseModel):
     ciclo: Optional[str] = None
     nombre_recolector: Optional[str] = None
     estado: Optional[str] = None
+    precio_unitario: Optional[float] = None
+    monto_pagado: Optional[float] = None
+    metodo_pago: Optional[str] = None
     entregado: Optional[bool] = None
+    fecha_hora_entrega: Optional[datetime] = None
 
 class ConfirmarEntregaPaymentRequest(BaseModel):
     numero_boleto: int

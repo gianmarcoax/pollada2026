@@ -1,0 +1,39 @@
+# Control de versiones
+.git
+.gitignore
+
+# Entornos virtuales Python
+venv/
+env/
+.env
+.venv/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+
+# Base de datos local (se generará en el contenedor con volumen)
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos de test (no necesarios en producción)
+test_*.py
+
+# Archivos de configuración de despliegue alternativo
+Procfile
+render.yaml
+
+# Archivos del sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# IDEs
+.vscode/
+.idea/
+*.swp

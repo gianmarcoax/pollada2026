@@ -45,13 +45,7 @@ FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-# Montar imágenes estáticas en /static
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-# Montar frontend estático en /app
-app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
-
-# Incluir routers de la API
+# ── Incluir routers de la API PRIMERO para que tengan prioridad sobre StaticFiles ──
 app.include_router(auth.router)
 app.include_router(eventos.router)
 app.include_router(tickets.router)
@@ -71,3 +65,7 @@ def get_root_css():
 @app.get("/app.js", include_in_schema=False)
 def get_root_js():
     return FileResponse(os.path.join(FRONTEND_DIR, "app.js"))
+
+# ── StaticFiles AL FINAL para no interceptar rutas de la API ──
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
