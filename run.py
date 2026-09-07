@@ -22,9 +22,15 @@ def get_local_ip():
         s.close()
     return local_ip
 
+import os
+
 if __name__ == "__main__":
     ip = get_local_ip()
-    port = 8000
+    port_env = os.environ.get("PORT", "8000")
+    try:
+        port = int(port_env)
+    except (ValueError, TypeError):
+        port = 8000
 
     print("\n" + "="*70)
     print("  🎟️   SISTEMA DE GESTIÓN DE TICKETS - SERVIDOR LOCAL Y RED   🎟️")
