@@ -4,6 +4,12 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 # En Docker usa la ruta del volumen; en local usa el archivo del directorio actual
 _db_path = os.environ.get("DATABASE_PATH", "./sistema_tickets.db")
+
+# Crear el directorio contenedor si no existe (evita error 'unable to open database file' en Docker/Railway)
+_db_dir = os.path.dirname(os.path.abspath(_db_path))
+if _db_dir:
+    os.makedirs(_db_dir, exist_ok=True)
+
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{_db_path}"
 
 # connect_args={"check_same_thread": False} es necesario para SQLite en FastAPI

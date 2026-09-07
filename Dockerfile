@@ -24,5 +24,5 @@ RUN mkdir -p /app/static
 # Exponer el puerto interno de la aplicación
 EXPOSE 8000
 
-# Comando de inicio: compatible con Railway ($PORT dinámico) y VPS/Docker local (8000)
+# Comando de inicio: compatible con Railway ($PORT dinámico) y Docker local (8000)
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
