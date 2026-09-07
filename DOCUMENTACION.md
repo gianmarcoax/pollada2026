@@ -15,11 +15,12 @@
 7. [Pantallas del Frontend](#7-pantallas-del-frontend)
 8. [Configuración Local](#8-configuración-local)
 9. [Despliegue en VPS con Docker](#9-despliegue-en-vps-con-docker)
-10. [Actualizar el servidor](#10-actualizar-el-servidor-subir-cambios)
-11. [Importar y Exportar datos](#11-importar-y-exportar-datos)
-12. [Variables de entorno](#12-variables-de-entorno)
-13. [Credenciales por defecto](#13-credenciales-por-defecto)
-14. [Notas de desarrollo](#14-notas-de-desarrollo)
+10. [Despliegue en Railway (Nube PaaS)](#10-despliegue-en-railway-nube-paas)
+11. [Actualizar el servidor](#11-actualizar-el-servidor-subir-cambios)
+12. [Importar y Exportar datos](#12-importar-y-exportar-datos)
+13. [Variables de entorno](#13-variables-de-entorno)
+14. [Credenciales por defecto](#14-credenciales-por-defecto)
+15. [Notas de desarrollo](#15-notas-de-desarrollo)
 
 ---
 
@@ -404,7 +405,50 @@ Los datos sobreviven a reinicios y rebuilds del contenedor.
 
 ---
 
-## 10. Actualizar el servidor (subir cambios)
+## 10. Despliegue en Railway (Nube PaaS)
+
+Railway permite desplegar la aplicación directamente conectando el repositorio de GitHub con soporte para CI/CD automático, HTTPS gratuito y volúmenes persistentes.
+
+### Pasos de Despliegue:
+
+1. **Crear el proyecto:**
+   - Iniciar sesión en [railway.app](https://railway.app/) con GitHub.
+   - Clic en **`+ New Project`** → **`Deploy from GitHub repo`**.
+   - Seleccionar el repositorio de la aplicación (`sistema-tickets-polladas`).
+
+2. **Persistencia de Datos (Volumen para SQLite):**
+   - Como los contenedores en la nube son efímeros, se debe adjuntar un volumen para no perder las ventas entre despliegues.
+   - En el lienzo de Railway: clic en **`+ Create`** (o presionar `Ctrl + K` y escribir *Add Volume*).
+   - Conectar el volumen al servicio y configurar la ruta de montaje (**Mount Path**):
+     ```text
+     /app/data
+     ```
+
+3. **Variables de Entorno:**
+   - En la pestaña **`Variables`** del servicio, configurar:
+     | Variable | Valor | Descripción |
+     |---|---|---|
+     | `DATABASE_PATH` | `/app/data/sistema_tickets.db` | Almacena la BD dentro del volumen persistente |
+     | `PORT` | `8000` | Puerto interno (o el asignado por Railway) |
+     | `SECRET_KEY` | *(Texto aleatorio seguro)* | Firma de tokens JWT |
+
+4. **Dominio Público HTTPS:**
+   - Ir a la pestaña **`Settings`** → sección **`Networking`**.
+   - En **Public Networking**, hacer clic en **`Generate Domain`**.
+   - Railway generará una URL segura del tipo `https://tu-proyecto.up.railway.app`.
+
+5. **Acceso a la aplicación:**
+   - Navegar a `https://tu-proyecto.up.railway.app/app/`.
+   - Credenciales: `admin` / `admin123`.
+
+### Consideraciones técnicas para Railway:
+- **Gestión de Puerto Dinámico:** En el `Dockerfile`, el arranque se delega a `CMD ["python", "run.py"]`, el cual lee de forma segura `os.environ.get("PORT")` convirtiéndolo a un entero válido para evitar fallos de inicialización con Uvicorn.
+- **Creación automática de carpetas:** `app/database.py` crea recursivamente cualquier directorio contenedor faltante (como `/app/data`) antes de conectar SQLite, impidiendo errores de `unable to open database file`.
+- **Integración Continua (CI/CD):** Cada `git push origin main` desencadena una nueva compilación y despliegue automático en Railway sin interrumpir la persistencia de datos.
+
+---
+
+## 11. Actualizar el servidor VPS (subir cambios)
 
 Ejecutar **desde PowerShell local**:
 
@@ -439,7 +483,7 @@ ssh -i $env:USERPROFILE\.ssh\id_ed25519_vps root@161.132.39.114 `
 
 ---
 
-## 11. Importar y Exportar datos
+## 12. Importar y Exportar datos
 
 ### Exportar
 Dashboard → **Exportar Excel** o **Exportar CSV** — genera el reporte contable completo del evento activo.
@@ -474,24 +518,26 @@ Dashboard → botón **Importar** → seleccionar archivo y modo.
 - **Combinar**: agrega nuevos y actualiza los existentes por Nº Boleto. No borra nada.
 - **Reemplazar todo**: borra todos los boletos del evento y los carga desde el archivo.
 
-**Flujo recomendado para sincronizar datos con la VPS:**
+**Flujo recomendado para sincronizar datos con la VPS o Railway:**
 1. Exportar el Excel actual como backup de seguridad.
 2. Editar con los datos actualizados.
 3. Importar en modo **Combinar**.
 
 ---
 
-## 12. Variables de Entorno
+## 13. Variables de Entorno
 
 | Variable | Valor por defecto | Descripción |
 |---|---|---|
-| `DATABASE_PATH` | `sistema_tickets.db` | Ruta al archivo SQLite. En Docker: `/app/data/sistema_tickets.db` |
-| `PYTHONUNBUFFERED` | `1` | Logs en tiempo real (Docker) |
-| `PYTHONDONTWRITEBYTECODE` | `1` | Evita generar archivos `.pyc` (Docker) |
+| `DATABASE_PATH` | `sistema_tickets.db` | Ruta al archivo SQLite. En Docker/Railway: `/app/data/sistema_tickets.db` |
+| `PORT` | `8000` | Puerto en el que Uvicorn escucha las peticiones |
+| `SECRET_KEY` | *(clave dev)* | Secreto para generación y validación de tokens JWT |
+| `PYTHONUNBUFFERED` | `1` | Logs en tiempo real (Docker/Railway) |
+| `PYTHONDONTWRITEBYTECODE` | `1` | Evita generar archivos `.pyc` (Docker/Railway) |
 
 ---
 
-## 13. Credenciales por Defecto
+## 14. Credenciales por Defecto
 
 | Campo | Valor |
 |---|---|
@@ -502,7 +548,7 @@ Dashboard → botón **Importar** → seleccionar archivo y modo.
 
 ---
 
-## 14. Notas de Desarrollo
+## 15. Notas de Desarrollo
 
 - **Frontend sin dependencias pesadas:** HTML5 + CSS puro + JavaScript Vanilla para asegurar máxima velocidad y compatibilidad en dispositivos móviles.
 - **Zona Horaria de Perú (UTC-5):** Implementada mediante el helper `ahora_peru()` en el backend, garantizando que el registro de entregas físicas y pagos en puerta conserve siempre la hora local de Perú (`America/Lima`) sin importar la zona configurada en el servidor o contenedor.
@@ -513,4 +559,4 @@ Dashboard → botón **Importar** → seleccionar archivo y modo.
 
 ---
 
-*Sistema de Gestión de Boletos — Documentación v2.1 — Actualizado con Pagos Múltiples, Responsividad y Zona Horaria Perú*
+*Sistema de Gestión de Boletos — Documentación v2.2 — Actualizado con Despliegue en Railway, CI/CD y Persistencia de Volúmenes*

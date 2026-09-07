@@ -140,8 +140,8 @@ def exportar_tickets_excel(
 
     headers = [
         "Nº Boleto", "Código / DNI", "Nombre Comprador", "Carrera", "Ciclo",
-        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pago (S/)",
-        "Método de Pago", "Entregado", "Fecha de Entrega"
+        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pagado (S/)",
+        "Monto Pendiente (S/)", "Método de Pago", "Entregado", "Fecha de Entrega"
     ]
     ws.append(headers)
 
@@ -156,37 +156,40 @@ def exportar_tickets_excel(
         entregado_str = "Sí" if t.entregado else "No"
         recolector_str = t.nombre_recolector if t.nombre_recolector else t.nombre_alumno
 
-        # Obtener lista de pagos — una fila por cada método
-        try:
-            pagos = json.loads(t.pagos_detalle or "[]")
-        except Exception:
-            pagos = []
-        if not pagos:
-            # Fallback para tickets sin pagos_detalle (datos viejos)
-            pagos = [{"monto": t.monto_pagado, "metodo": t.metodo_pago}]
+        # Una sola fila por boleto con los datos consolidados
+        ws.append([
+            t.numero_boleto,
+            t.codigo_alumno,
+            t.nombre_alumno,
+            t.carrera,
+            t.ciclo,
+            recolector_str,
+            t.estado.upper(),
+            round(t.monto_total, 2),
+            round(t.monto_pagado, 2),
+            round(t.monto_pendiente, 2),
+            t.metodo_pago.upper(),
+            entregado_str,
+            fecha_str,
+        ])
 
-        for pago in pagos:
-            ws.append([
-                t.numero_boleto,
-                t.codigo_alumno,
-                t.nombre_alumno,
-                t.carrera,
-                t.ciclo,
-                recolector_str,
-                t.estado.upper(),
-                t.monto_total,
-                round(float(pago.get("monto", 0)), 2),
-                str(pago.get("metodo", "ninguno")).upper(),
-                entregado_str,
-                fecha_str,
-            ])
+    # Estilos de datos
+    estado_fills = {
+        "PAGADO":              PatternFill(start_color="D6F4E5", end_color="D6F4E5", fill_type="solid"),
+        "PARCIALMENTE_PAGADO": PatternFill(start_color="FFF3CD", end_color="FFF3CD", fill_type="solid"),
+        "SEPARADO":            PatternFill(start_color="F8D7DA", end_color="F8D7DA", fill_type="solid"),
+    }
 
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+        estado_cell_val = str(row[6].value or "")  # col 7 → index 6
+        row_fill = estado_fills.get(estado_cell_val)
         for cell in row:
             cell.border = thin_border
-            if cell.column in [1, 2, 5, 7, 11, 12]:
+            if row_fill:
+                cell.fill = row_fill
+            if cell.column in [1, 2, 5, 7, 11, 12, 13]:
                 cell.alignment = Alignment(horizontal="center")
-            elif cell.column in [8, 9]:
+            elif cell.column in [8, 9, 10]:
                 cell.number_format = '#,##0.00'
 
     for col in ws.columns:
@@ -230,8 +233,8 @@ def exportar_tickets_csv(
 
     writer.writerow([
         "Nº Boleto", "Código / DNI", "Nombre Comprador", "Carrera", "Ciclo",
-        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pago (S/)",
-        "Método de Pago", "Entregado", "Fecha de Entrega"
+        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pagado (S/)",
+        "Monto Pendiente (S/)", "Método de Pago", "Entregado", "Fecha de Entrega"
     ])
 
     for t in tickets:
@@ -239,28 +242,22 @@ def exportar_tickets_csv(
         entregado_str = "Sí" if t.entregado else "No"
         recolector_str = t.nombre_recolector if t.nombre_recolector else t.nombre_alumno
 
-        try:
-            pagos = json.loads(t.pagos_detalle or "[]")
-        except Exception:
-            pagos = []
-        if not pagos:
-            pagos = [{"monto": t.monto_pagado, "metodo": t.metodo_pago}]
-
-        for pago in pagos:
-            writer.writerow([
-                t.numero_boleto,
-                t.codigo_alumno,
-                t.nombre_alumno,
-                t.carrera,
-                t.ciclo,
-                recolector_str,
-                t.estado.upper(),
-                f"{t.monto_total:.2f}",
-                f"{float(pago.get('monto', 0)):.2f}",
-                str(pago.get('metodo', 'ninguno')).upper(),
-                entregado_str,
-                fecha_str,
-            ])
+        # Una sola fila por boleto con datos consolidados
+        writer.writerow([
+            t.numero_boleto,
+            t.codigo_alumno,
+            t.nombre_alumno,
+            t.carrera,
+            t.ciclo,
+            recolector_str,
+            t.estado.upper(),
+            f"{t.monto_total:.2f}",
+            f"{t.monto_pagado:.2f}",
+            f"{t.monto_pendiente:.2f}",
+            t.metodo_pago.upper(),
+            entregado_str,
+            fecha_str,
+        ])
 
     filename = f"reporte_boletos_{evento.nombre.replace(' ', '_')}.csv"
     return Response(

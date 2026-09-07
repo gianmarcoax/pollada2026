@@ -147,9 +147,14 @@ def _row_to_ticket_data(row: dict, evento_id: int) -> dict:
     if numero <= 0:
         return None  # fila inválida
 
-    monto_total  = _parse_float(get(["monto total (s/)", "monto_total", "total"]), 15.0)
-    monto_pagado = _parse_float(get(["monto pago (s/)", "monto pagado (s/)", "monto_pagado", "monto_pago", "pagado", "pago"]), 0.0)
-    monto_pend   = max(0.0, round(monto_total - monto_pagado, 2))
+    monto_total   = _parse_float(get(["monto total (s/)", "monto_total", "total"]), 15.0)
+    monto_pagado  = _parse_float(get(["monto pagado (s/)", "monto pago (s/)", "monto_pagado", "monto_pago", "pagado", "pago"]), 0.0)
+    # Intentar leer monto pendiente desde el archivo; si no existe, calcularlo
+    _monto_pend_raw = get(["monto pendiente (s/)", "monto_pendiente", "pendiente"])
+    if _monto_pend_raw not in ("", None, "-", "None"):
+        monto_pend = _parse_float(_monto_pend_raw, max(0.0, round(monto_total - monto_pagado, 2)))
+    else:
+        monto_pend = max(0.0, round(monto_total - monto_pagado, 2))
     entregado    = _parse_bool(get(["entregado"]))
     fecha_entrega = _parse_fecha(get(["fecha de entrega", "fecha_hora_entrega"]))
     metodo       = _parse_metodo(get(["método de pago", "metodo de pago", "metodo_pago", "método", "metodo"]))
