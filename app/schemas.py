@@ -1,6 +1,7 @@
+import json
 from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, Field
+from typing import Optional, List, Any
+from pydantic import BaseModel, Field, field_validator
 
 # ----------------- JWT SCHEMAS -----------------
 class Token(BaseModel):
@@ -64,44 +65,61 @@ class EventoKPIsOut(BaseModel):
     entregados: int
     total_recaudado: float
     total_pendiente: float
+    # Desglose por método de pago
+    total_yape:     float = 0.0
+    total_efectivo: float = 0.0
+    total_plin:     float = 0.0
+    # Cobertura de estudiantes matriculados
     estudiantes_matriculados_total: int
     estudiantes_matriculados_con_boleto: int
     porcentaje_cobertura_matriculados: float
 
+# ----------------- PAGO INDIVIDUAL -----------------
+class ItemPago(BaseModel):
+    """Representa un pago parcial con monto y método específico."""
+    monto:  float  # Monto abonado en este método
+    metodo: str    # efectivo | yape | plin | ninguno
+
 # ----------------- TICKET & VENTA SCHEMAS -----------------
 class ItemBoletoVenta(BaseModel):
-    numero_boleto: int # Número del boleto físico (1 a 1000)
-    nombre_recolector: Optional[str] = None # Persona referencial para recojo de esta pollada
+    numero_boleto: int               # Número del boleto físico (1 a 1000)
+    nombre_recolector: Optional[str] = None  # Persona referencial para recojo
 
 class VentaMultipleCreate(BaseModel):
     evento_id: int
-    codigo_alumno: str # Código de 6 cifras o DNI de 7/8 cifras
+    codigo_alumno: str               # Código de 6 cifras o DNI de 7/8 cifras
     nombre_alumno: str
-    carrera: Optional[str] = "INGENIERIA DE SISTEMAS"
-    ciclo: Optional[str] = "1"
-    estado: str = "pagado" # separado | parcialmente_pagado | pagado
-    precio_unitario: float = 15.0
-    monto_pagado_total: float = 0.0 # Monto total abonado en la transacción
-    metodo_pago: Optional[str] = "efectivo" # yape | plin | efectivo | ninguno
-    boletos: List[ItemBoletoVenta] # Lista de boletos físicos comprados (hasta 20)
+    carrera: Optional[str]  = "INGENIERIA DE SISTEMAS"
+    ciclo:   Optional[str]  = "1"
+    estado:  str            = "pagado"   # separado | parcialmente_pagado | pagado
+    precio_unitario: float  = 15.0
+    # ── Lista dinámica de pagos (nuevo) ──
+    pagos: Optional[List[ItemPago]] = []
+    # ── Campos legacy (backward compat si no se usan pagos) ──
+    monto_pagado_total: float          = 0.0
+    metodo_pago:        Optional[str]  = "ninguno"
+    boletos: List[ItemBoletoVenta]     # Lista de boletos físicos (hasta 20)
 
 class TicketUpdate(BaseModel):
-    nombre_alumno: Optional[str] = None
-    codigo_alumno: Optional[str] = None
-    carrera: Optional[str] = None
-    ciclo: Optional[str] = None
-    nombre_recolector: Optional[str] = None
-    estado: Optional[str] = None
-    precio_unitario: Optional[float] = None
-    monto_pagado: Optional[float] = None
-    metodo_pago: Optional[str] = None
-    entregado: Optional[bool] = None
-    fecha_hora_entrega: Optional[datetime] = None
+    nombre_alumno:     Optional[str]            = None
+    codigo_alumno:     Optional[str]            = None
+    carrera:           Optional[str]            = None
+    ciclo:             Optional[str]            = None
+    nombre_recolector: Optional[str]            = None
+    estado:            Optional[str]            = None
+    precio_unitario:   Optional[float]          = None
+    # ── Lista de pagos: si se envía, reemplaza toda la lista ──
+    pagos:             Optional[List[ItemPago]] = None
+    # ── Campos legacy ──
+    monto_pagado:      Optional[float]          = None
+    metodo_pago:       Optional[str]            = None
+    entregado:         Optional[bool]           = None
+    fecha_hora_entrega:Optional[datetime]       = None
 
 class ConfirmarEntregaPaymentRequest(BaseModel):
-    numero_boleto: int
+    numero_boleto:           int
     monto_cobrado_adicional: Optional[float] = 0.0
-    metodo_pago_entrega: Optional[str] = None
+    metodo_pago_entrega:     Optional[str]   = None
 
 class TicketOut(BaseModel):
     id: int
@@ -118,9 +136,22 @@ class TicketOut(BaseModel):
     monto_pagado: float
     monto_pendiente: float
     metodo_pago: str
+    pagos_detalle: List[Any] = []  # Lista de {monto, metodo} parseada desde JSON
     entregado: bool
     fecha_hora_entrega: Optional[datetime] = None
     evento: Optional[EventoOut] = None
+
+    @field_validator("pagos_detalle", mode="before")
+    @classmethod
+    def parse_pagos_detalle(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return []
+        if isinstance(v, list):
+            return v
+        return []
 
     class Config:
         from_attributes = True

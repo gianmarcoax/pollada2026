@@ -194,8 +194,18 @@ async function loadDashboard(eventId) {
       document.getElementById('kpi-recaudado').textContent = `S/ ${kpi.total_recaudado.toFixed(2)}`;
       document.getElementById('kpi-pendiente').textContent = `S/ ${kpi.total_pendiente.toFixed(2)}`;
       document.getElementById('kpi-vendidos').textContent = kpi.pagados;
-      document.getElementById('kpi-parciales').textContent = kpi.parcialmente_pagados;
-      document.getElementById('kpi-entregados').textContent = kpi.entregados;
+      const elParciales = document.getElementById('kpi-parciales');
+      if (elParciales) elParciales.textContent = kpi.parcialmente_pagados;
+      const elEntregados = document.getElementById('kpi-entregados');
+      if (elEntregados) elEntregados.textContent = kpi.entregados;
+
+      // Desglose por Método de Pago
+      const elYape = document.getElementById('kpi-yape');
+      const elEfec = document.getElementById('kpi-efectivo');
+      const elPlin = document.getElementById('kpi-plin');
+      if (elYape) elYape.textContent = `S/ ${(kpi.total_yape || 0).toFixed(2)}`;
+      if (elEfec) elEfec.textContent = `S/ ${(kpi.total_efectivo || 0).toFixed(2)}`;
+      if (elPlin) elPlin.textContent = `S/ ${(kpi.total_plin || 0).toFixed(2)}`;
     }
 
     // 2. Tabla de Boletos del Evento
@@ -344,13 +354,104 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// ================= Manejo Dinámico de Pagos por Método =================
+function createPagoRow(monto = 0.0, metodo = 'efectivo', onUpdate = null) {
+  const row = document.createElement('div');
+  row.className = 'pago-row';
+  row.innerHTML = `
+    <div style="display:flex;flex-direction:column;flex:1.2;">
+      <span style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">Monto (S/)</span>
+      <input type="number" step="0.5" min="0" class="form-control input-pago-monto" placeholder="0.00" value="${monto > 0 ? monto.toFixed(2) : (monto === 0 ? '0.00' : '')}">
+    </div>
+    <div style="display:flex;flex-direction:column;flex:1.5;">
+      <span style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">Método</span>
+      <select class="form-control select-pago-metodo">
+        <option value="efectivo" ${metodo === 'efectivo' ? 'selected' : ''}>Efectivo</option>
+        <option value="yape" ${metodo === 'yape' ? 'selected' : ''}>Yape</option>
+        <option value="plin" ${metodo === 'plin' ? 'selected' : ''}>Plin</option>
+        <option value="ninguno" ${metodo === 'ninguno' ? 'selected' : ''}>Ninguno (Separado)</option>
+      </select>
+    </div>
+    <button type="button" class="btn-remove-pago" title="Eliminar este método">
+      <i class="fa-solid fa-trash-can"></i>
+    </button>
+  `;
+
+  const inputMonto = row.querySelector('.input-pago-monto');
+  const selectMetodo = row.querySelector('.select-pago-metodo');
+  const btnRemove = row.querySelector('.btn-remove-pago');
+
+  inputMonto.addEventListener('input', () => { if (onUpdate) onUpdate(); });
+  selectMetodo.addEventListener('change', () => { if (onUpdate) onUpdate(); });
+  btnRemove.addEventListener('click', () => {
+    row.remove();
+    if (onUpdate) onUpdate();
+  });
+
+  return row;
+}
+
+function updatePagosSummary(containerId, totalId, pendienteId, estadoPreviewId, totalEsperado) {
+  const container = document.getElementById(containerId);
+  const totalEl = document.getElementById(totalId);
+  const pendienteEl = document.getElementById(pendienteId);
+  const estadoPreviewEl = document.getElementById(estadoPreviewId);
+
+  if (!container || !totalEl || !pendienteEl || !estadoPreviewEl) return;
+
+  const rows = container.querySelectorAll('.pago-row');
+  let sumaPagada = 0;
+  rows.forEach(r => {
+    const val = parseFloat(r.querySelector('.input-pago-monto').value) || 0;
+    sumaPagada += val;
+  });
+  sumaPagada = Math.round(sumaPagada * 100) / 100;
+  const pendiente = Math.max(0, Math.round((totalEsperado - sumaPagada) * 100) / 100);
+
+  totalEl.textContent = `S/ ${sumaPagada.toFixed(2)}`;
+  pendienteEl.textContent = `S/ ${pendiente.toFixed(2)}`;
+
+  let badgeClass = 'estado-separado';
+  let texto = 'Separado';
+  if (sumaPagada >= totalEsperado && totalEsperado > 0) {
+    badgeClass = 'estado-pagado';
+    texto = 'Pagado';
+  } else if (sumaPagada > 0) {
+    badgeClass = 'estado-parcial';
+    texto = 'Parcial';
+  }
+
+  estadoPreviewEl.className = `pagos-estado-preview ${badgeClass}`;
+  estadoPreviewEl.textContent = `Estado: ${texto}`;
+}
+
+function getPagosFromContainer(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return [];
+  const rows = container.querySelectorAll('.pago-row');
+  const pagos = [];
+  rows.forEach(r => {
+    const m = parseFloat(r.querySelector('.input-pago-monto').value) || 0;
+    const met = r.querySelector('.select-pago-metodo').value;
+    if (m > 0 || met !== 'ninguno') {
+      pagos.push({ monto: m, metodo: met });
+    }
+  });
+  return pagos;
+}
+
 // ================= Generador Dinámico de Recolectores según Cantidad =================
 const inputCantidad = document.getElementById('venta-cantidad');
 const inputBoletoInicial = document.getElementById('venta-boleto-inicial');
 const recolectoresContainer = document.getElementById('recolectores-container');
 const inputPrecioUnitario = document.getElementById('venta-precio-unitario');
-const inputMontoPagado = document.getElementById('venta-monto-pagado');
-const selectEstadoVenta = document.getElementById('venta-estado');
+
+function updateVentaPagosSummary() {
+  const cantidad = parseInt(inputCantidad.value) || 1;
+  const precioUnit = parseFloat(inputPrecioUnitario.value) || 15.0;
+  const totalEsperado = cantidad * precioUnit;
+  updatePagosSummary('venta-pagos-container', 'venta-total-pagado', 'venta-total-pendiente', 'venta-estado-preview', totalEsperado);
+}
 
 function updateRecolectoresInputs() {
   const cantidad = parseInt(inputCantidad.value) || 1;
@@ -369,43 +470,46 @@ function updateRecolectoresInputs() {
     `;
     recolectoresContainer.appendChild(row);
   }
-
-  // Recalcular montos
-  const precioUnit = parseFloat(inputPrecioUnitario.value) || 15.0;
-  const totalCalculado = cantidad * precioUnit;
-
-  if (selectEstadoVenta.value === 'pagado') {
-    inputMontoPagado.value = totalCalculado.toFixed(2);
-  } else if (selectEstadoVenta.value === 'separado') {
-    inputMontoPagado.value = '0.00';
-    document.getElementById('venta-metodo-pago').value = 'ninguno';
-  }
 }
 
-inputCantidad.addEventListener('change', updateRecolectoresInputs);
-inputCantidad.addEventListener('input', updateRecolectoresInputs);
-inputBoletoInicial.addEventListener('input', updateRecolectoresInputs);
-inputPrecioUnitario.addEventListener('input', updateRecolectoresInputs);
-document.getElementById('venta-nombre').addEventListener('input', updateRecolectoresInputs);
-
-selectEstadoVenta.addEventListener('change', () => {
+function initVentaPagos() {
+  const container = document.getElementById('venta-pagos-container');
+  container.innerHTML = '';
   const cantidad = parseInt(inputCantidad.value) || 1;
   const precioUnit = parseFloat(inputPrecioUnitario.value) || 15.0;
-  const totalCalculado = cantidad * precioUnit;
+  container.appendChild(createPagoRow(cantidad * precioUnit, 'efectivo', updateVentaPagosSummary));
+  updateVentaPagosSummary();
+}
 
-  if (selectEstadoVenta.value === 'pagado') {
-    inputMontoPagado.value = totalCalculado.toFixed(2);
-    if (document.getElementById('venta-metodo-pago').value === 'ninguno') {
-      document.getElementById('venta-metodo-pago').value = 'efectivo';
-    }
-  } else if (selectEstadoVenta.value === 'separado') {
-    inputMontoPagado.value = '0.00';
-    document.getElementById('venta-metodo-pago').value = 'ninguno';
-  }
+document.getElementById('btn-agregar-pago-venta').addEventListener('click', () => {
+  const container = document.getElementById('venta-pagos-container');
+  container.appendChild(createPagoRow(0.0, 'efectivo', updateVentaPagosSummary));
+  updateVentaPagosSummary();
 });
 
-// Inicializar recolectores
+function onVentaCantidadOrPrecioChange() {
+  updateRecolectoresInputs();
+  const cantidad = parseInt(inputCantidad.value) || 1;
+  const precioUnit = parseFloat(inputPrecioUnitario.value) || 15.0;
+  const totalEsperado = cantidad * precioUnit;
+  const container = document.getElementById('venta-pagos-container');
+  const rows = container.querySelectorAll('.pago-row');
+  if (rows.length === 1) {
+    const input = rows[0].querySelector('.input-pago-monto');
+    input.value = totalEsperado.toFixed(2);
+  }
+  updateVentaPagosSummary();
+}
+
+inputCantidad.addEventListener('change', onVentaCantidadOrPrecioChange);
+inputCantidad.addEventListener('input', onVentaCantidadOrPrecioChange);
+inputBoletoInicial.addEventListener('input', updateRecolectoresInputs);
+inputPrecioUnitario.addEventListener('input', onVentaCantidadOrPrecioChange);
+document.getElementById('venta-nombre').addEventListener('input', updateRecolectoresInputs);
+
+// Inicializar recolectores y pagos en venta
 updateRecolectoresInputs();
+initVentaPagos();
 
 // Registrar Venta Múltiple
 document.getElementById('venta-form').addEventListener('submit', async (e) => {
@@ -425,16 +529,26 @@ document.getElementById('venta-form').addEventListener('submit', async (e) => {
     });
   }
 
+  const pagos = getPagosFromContainer('venta-pagos-container');
+  const precioUnitario = parseFloat(inputPrecioUnitario.value) || 15.0;
+  const totalEsperado = cantidad * precioUnitario;
+  let sumaPagos = pagos.reduce((acc, p) => acc + (parseFloat(p.monto) || 0), 0);
+  let estadoCalculado = 'separado';
+  if (sumaPagos >= totalEsperado && totalEsperado > 0) {
+    estadoCalculado = 'pagado';
+  } else if (sumaPagos > 0) {
+    estadoCalculado = 'parcialmente_pagado';
+  }
+
   const payload = {
     evento_id: parseInt(document.getElementById('venta-evento-select').value),
     codigo_alumno: document.getElementById('venta-codigo').value,
     nombre_alumno: document.getElementById('venta-nombre').value,
     carrera: document.getElementById('venta-carrera').value,
     ciclo: document.getElementById('venta-ciclo').value,
-    estado: selectEstadoVenta.value,
-    precio_unitario: parseFloat(inputPrecioUnitario.value) || 15.0,
-    monto_pagado_total: parseFloat(inputMontoPagado.value) || 0.0,
-    metodo_pago: document.getElementById('venta-metodo-pago').value,
+    estado: estadoCalculado,
+    precio_unitario: precioUnitario,
+    pagos: pagos,
     boletos: boletos
   };
 
@@ -502,6 +616,7 @@ document.getElementById('btn-nueva-venta-reset').addEventListener('click', () =>
   document.getElementById('venta-cantidad').value = '1';
   document.getElementById('venta-boleto-inicial').value = '';
   updateRecolectoresInputs();
+  initVentaPagos();
 });
 
 // Entrega de Polladas (Búsqueda)
@@ -892,6 +1007,7 @@ function renderEditResults(tickets) {
           data-precio="${t.precio_unitario}"
           data-pagado="${t.monto_pagado}"
           data-metodo="${t.metodo_pago}"
+          data-pagos="${encodeURIComponent(JSON.stringify(t.pagos_detalle || []))}"
           data-entregado="${t.entregado}">
           <i class="fa-solid fa-pen-to-square"></i> Editar este Boleto
         </button>
@@ -904,6 +1020,13 @@ function renderEditResults(tickets) {
   document.querySelectorAll('.btn-edit-open').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const b = e.currentTarget;
+      let pagosParsed = [];
+      try {
+        pagosParsed = b.dataset.pagos ? JSON.parse(decodeURIComponent(b.dataset.pagos)) : [];
+      } catch (err) {
+        pagosParsed = [];
+      }
+
       openEditModal({
         id:          b.dataset.id,
         numero:      b.dataset.num,
@@ -916,11 +1039,25 @@ function renderEditResults(tickets) {
         precio:      b.dataset.precio,
         pagado:      b.dataset.pagado,
         metodo:      b.dataset.metodo,
+        pagos:       pagosParsed,
         entregado:   b.dataset.entregado
       });
     });
   });
 }
+
+function updateEditPagosSummary() {
+  const precioUnit = parseFloat(document.getElementById('edit-precio').value) || 15.0;
+  updatePagosSummary('edit-pagos-container', 'edit-total-pagado', 'edit-total-pendiente', 'edit-estado-preview', precioUnit);
+}
+
+document.getElementById('btn-agregar-pago-edit').addEventListener('click', () => {
+  const container = document.getElementById('edit-pagos-container');
+  container.appendChild(createPagoRow(0.0, 'efectivo', updateEditPagosSummary));
+  updateEditPagosSummary();
+});
+
+document.getElementById('edit-precio').addEventListener('input', updateEditPagosSummary);
 
 function openEditModal(data) {
   document.getElementById('edit-ticket-id').value        = data.id;
@@ -930,12 +1067,25 @@ function openEditModal(data) {
   document.getElementById('edit-carrera').value          = data.carrera;
   document.getElementById('edit-ciclo').value            = data.ciclo;
   document.getElementById('edit-recolector').value       = data.recolector;
-  document.getElementById('edit-estado').value           = data.estado;
   document.getElementById('edit-precio').value           = parseFloat(data.precio).toFixed(2);
-  document.getElementById('edit-monto-pagado').value     = parseFloat(data.pagado).toFixed(2);
-  document.getElementById('edit-metodo-pago').value      = data.metodo;
-  document.getElementById('edit-entregado').value        = data.entregado === 'true' ? 'true' : 'false';
+  document.getElementById('edit-entregado').value        = (data.entregado === 'true' || data.entregado === true) ? 'true' : 'false';
   document.getElementById('edit-error-box').classList.add('hidden');
+
+  const container = document.getElementById('edit-pagos-container');
+  container.innerHTML = '';
+
+  let pagosList = data.pagos;
+  if (!Array.isArray(pagosList) || pagosList.length === 0) {
+    const pagadoNum = parseFloat(data.pagado) || 0;
+    const metodo = data.metodo || 'ninguno';
+    pagosList = [{ monto: pagadoNum, metodo: metodo }];
+  }
+
+  pagosList.forEach(p => {
+    container.appendChild(createPagoRow(parseFloat(p.monto) || 0, p.metodo || 'ninguno', updateEditPagosSummary));
+  });
+
+  updateEditPagosSummary();
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -950,32 +1100,28 @@ document.getElementById('btn-save-edit').addEventListener('click', async () => {
   const errorBox = document.getElementById('edit-error-box');
   errorBox.classList.add('hidden');
 
+  const pagos = getPagosFromContainer('edit-pagos-container');
+  const precioUnitario = parseFloat(document.getElementById('edit-precio').value);
+
+  if (isNaN(precioUnitario) || precioUnitario <= 0) {
+    errorBox.textContent = 'El precio unitario debe ser mayor a 0.';
+    errorBox.classList.remove('hidden');
+    return;
+  }
+
   const payload = {
     codigo_alumno:    document.getElementById('edit-codigo').value.trim(),
     nombre_alumno:    document.getElementById('edit-nombre').value.trim(),
     carrera:          document.getElementById('edit-carrera').value.trim(),
     ciclo:            document.getElementById('edit-ciclo').value.trim(),
     nombre_recolector: document.getElementById('edit-recolector').value.trim(),
-    estado:           document.getElementById('edit-estado').value,
-    precio_unitario:  parseFloat(document.getElementById('edit-precio').value),
-    monto_pagado:     parseFloat(document.getElementById('edit-monto-pagado').value),
-    metodo_pago:      document.getElementById('edit-metodo-pago').value,
+    precio_unitario:  precioUnitario,
+    pagos:            pagos,
     entregado:        document.getElementById('edit-entregado').value === 'true'
   };
 
-  // Validaciones básicas
   if (!payload.nombre_alumno) {
     errorBox.textContent = 'El nombre del comprador no puede estar vacío.';
-    errorBox.classList.remove('hidden');
-    return;
-  }
-  if (isNaN(payload.precio_unitario) || payload.precio_unitario <= 0) {
-    errorBox.textContent = 'El precio unitario debe ser mayor a 0.';
-    errorBox.classList.remove('hidden');
-    return;
-  }
-  if (isNaN(payload.monto_pagado) || payload.monto_pagado < 0) {
-    errorBox.textContent = 'El monto pagado no puede ser negativo.';
     errorBox.classList.remove('hidden');
     return;
   }

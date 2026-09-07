@@ -757,22 +757,40 @@ body {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
+  table-layout: auto;
 }
 
 .data-table th {
-  padding: 0.85rem 1rem;
-  font-size: 0.78rem;
+  padding: 0.75rem 0.5rem;
+  font-size: 0.75rem;
   font-weight: 800;
   color: var(--text-muted);
   text-transform: uppercase;
   border-bottom: 1px solid var(--border-color);
-  white-space: nowrap;
+  white-space: normal;
+  vertical-align: middle;
 }
 
 .data-table td {
-  padding: 0.95rem 1rem;
-  font-size: 0.88rem;
+  padding: 0.75rem 0.5rem;
+  font-size: 0.85rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  white-space: normal;
+  vertical-align: middle;
+  word-break: break-word;
+}
+
+.data-table tbody tr:hover { background: rgba(255, 255, 255, 0.03); }
+
+/* Para evitar que los números o fechas se rompan en lugares raros */
+.data-table td:nth-child(1), /* Nº Boleto */
+.data-table td:nth-child(6), /* Estado */
+.data-table td:nth-child(7), /* Total */
+.data-table td:nth-child(8), /* Pagado */
+.data-table td:nth-child(9), /* Pendiente */
+.data-table td:nth-child(10), /* Método */
+.data-table td:nth-child(11), /* Entregado */
+.data-table td:nth-child(12) { /* Fecha */
   white-space: nowrap;
 }
 
@@ -1072,3 +1090,95 @@ body {
 .toast-success { background: #10b981; }
 .toast-error { background: #f43f5e; }
 .toast-warning { background: #f59e0b; }
+
+/* ==========================================================================
+   DYNAMIC PAYMENTS & SUMMARY STYLES
+   ========================================================================== */
+.pagos-list-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.pago-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: rgba(15, 23, 42, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.6rem;
+  animation: toastSlideIn 0.2s ease-out;
+}
+
+.pago-row .input-monto {
+  flex: 1.2;
+}
+
+.pago-row .select-metodo {
+  flex: 1.5;
+}
+
+.pago-row .btn-remove-pago {
+  background: rgba(244, 63, 94, 0.15);
+  border: 1px solid rgba(244, 63, 94, 0.3);
+  color: var(--rose);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.pago-row .btn-remove-pago:hover {
+  background: rgba(244, 63, 94, 0.3);
+}
+
+.pagos-resumen {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.pagos-resumen strong {
+  font-weight: 800;
+  color: var(--emerald);
+}
+
+.pagos-resumen .pagos-pendiente strong {
+  color: var(--rose);
+}
+
+.pagos-resumen .pagos-estado-preview {
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--radius-full);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.pagos-resumen .pagos-estado-preview.estado-pagado {
+  color: var(--emerald);
+  background: var(--emerald-light);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.pagos-resumen .pagos-estado-preview.estado-parcial {
+  color: var(--amber);
+  background: var(--amber-light);
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.pagos-resumen .pagos-estado-preview.estado-separado {
+  color: var(--rose);
+  background: var(--rose-light);
+  border-color: rgba(244, 63, 94, 0.3);
+}

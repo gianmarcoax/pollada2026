@@ -139,12 +139,15 @@ Registro central de boletos — uno por cada boleto físico asignado.
 | `estado` | VARCHAR(50) | `pagado` / `parcialmente_pagado` / `separado` |
 | `precio_unitario` | FLOAT | Precio por boleto (default S/ 15.00) |
 | `monto_total` | FLOAT | Total a pagar |
-| `monto_pagado` | FLOAT | Monto abonado |
+| `monto_pagado` | FLOAT | Monto abonado acumulado (calculado) |
 | `monto_pendiente` | FLOAT | Saldo pendiente (calculado automáticamente) |
-| `metodo_pago` | VARCHAR(50) | `efectivo` / `yape` / `plin` / `ninguno` |
+| `metodo_pago` | VARCHAR(50) | `efectivo` / `yape` / `plin` / `mixto` / `ninguno` |
+| `pagos_detalle` | TEXT (JSON) | Array JSON con desglose de pagos: `[{"monto": 5.0, "metodo": "efectivo"}, ...]` |
 | `entregado` | BOOLEAN | Si ya se entregó la pollada físicamente |
-| `fecha_hora_entrega` | DATETIME | Timestamp de la entrega |
+| `fecha_hora_entrega` | DATETIME | Timestamp de entrega en **Hora de Perú (UTC-5)** |
 
+> **Migración automática:** Al arrancar la aplicación, `app/database.py` comprueba la existencia de `pagos_detalle` y la añade con `ALTER TABLE` si no existe, preservando la compatibilidad con registros existentes sin pérdida de datos.
+>
 > **Restricción única:** `(evento_id, numero_boleto)` — no puede haber dos boletos con el mismo número en el mismo evento.
 
 ---
@@ -221,6 +224,8 @@ Documentación Swagger interactiva:
 | `POST` | `/tickets/importar` | Importa desde Excel o CSV |
 
 #### Body: `POST /tickets/registrar-venta`
+Admite el campo `pagos` como array dinámico con múltiples abonos y métodos (`efectivo`, `yape`, `plin`). Si se envía `pagos`, los valores de `monto_pagado`, `metodo_pago` y `estado` se calculan automáticamente.
+
 ```json
 {
   "evento_id": 1,
@@ -228,17 +233,19 @@ Documentación Swagger interactiva:
   "nombre_alumno": "Juan Pérez",
   "carrera": "INGENIERIA DE SISTEMAS",
   "ciclo": "10",
-  "cantidad": 2,
+  "cantidad": 1,
   "boleto_inicial": 101,
-  "recolectores": ["Juan Pérez", "Maria López"],
-  "estado": "pagado",
+  "recolectores": ["Juan Pérez"],
   "precio_unitario": 15.00,
-  "monto_pagado": 30.00,
-  "metodo_pago": "yape"
+  "pagos": [
+    { "monto": 5.00, "metodo": "efectivo" },
+    { "monto": 10.00, "metodo": "plin" }
+  ]
 }
 ```
 
 #### Body: `POST /tickets/confirmar-entrega`
+Marca el boleto como entregado. Si se cobra saldo pendiente en puerta, se añade automáticamente al historial de `pagos_detalle` y se registra la fecha/hora en **Zona Horaria de Perú (UTC-5)**:
 ```json
 {
   "numero_boleto": 101,
@@ -249,6 +256,7 @@ Documentación Swagger interactiva:
 ```
 
 #### Body: `PATCH /tickets/{id}` — todos los campos opcionales
+Permite actualizar campos personales, de entrega o el desglose completo de pagos:
 ```json
 {
   "nombre_alumno": "Nuevo Nombre",
@@ -256,14 +264,15 @@ Documentación Swagger interactiva:
   "carrera": "SISTEMAS",
   "ciclo": "5",
   "nombre_recolector": "Pedro",
-  "estado": "pagado",
   "precio_unitario": 15.00,
-  "monto_pagado": 15.00,
-  "metodo_pago": "efectivo",
+  "pagos": [
+    { "monto": 10.00, "metodo": "yape" },
+    { "monto": 5.00, "metodo": "efectivo" }
+  ],
   "entregado": false
 }
 ```
-> `monto_pendiente` y `estado` se recalculan automáticamente si cambias `precio_unitario` o `monto_pagado`.
+> Si se envía `pagos`, el sistema recalcula de forma transparente `monto_pagado`, `monto_pendiente`, `metodo_pago` (`"mixto"` o el método individual) y el `estado` (`pagado`, `parcialmente_pagado` o `separado`).
 
 #### Form-data: `POST /tickets/importar`
 
@@ -285,41 +294,46 @@ La app es una **SPA** servida desde `/app/`. No recarga la página entre pantall
 - Redirección automática si ya hay sesión activa.
 
 ### Dashboard & KPIs
-Métricas en tiempo real del evento activo seleccionado en el header:
+Métricas en tiempo real del evento activo seleccionado en el header, distribuidas en una fila limpia y equilibrada de 5 tarjetas clave:
 
 | KPI | Descripción |
 |---|---|
-| Matriculados con Boleto | Alumnos del padrón que tienen al menos un boleto |
-| Total Boletos | Total registrados en el evento |
-| Recaudado Cobrado | Suma de `monto_pagado` |
-| Saldo Pendiente | Suma de `monto_pendiente` |
-| Pagados 100% | Boletos con estado `pagado` |
-| Parcialmente Pagados | Estado `parcialmente_pagado` |
-| Polladas Entregadas | Boletos con `entregado = true` |
+| **Matriculados con Boleto** | Cantidad de alumnos del padrón oficial que ya compraron y % de cobertura alcanzada |
+| **Total Boletos** | Total de boletos físicos registrados en el evento |
+| **Recaudado Cobrado** | Suma total de dinero real ingresado a caja (`monto_pagado`) |
+| **Saldo Pendiente** | Monto pendiente total por cobrar a los compradores (`monto_pendiente`) |
+| **Boletos Pagados (100%)** | Boletos con estado `pagado` (totalmente saldados) |
 
-Botones disponibles:
-- **Actualizar** — recarga KPIs y tabla
-- **Importar** — abre modal de importación Excel/CSV
-- **Exportar Excel** y **Exportar CSV**
+Botones de acción disponibles:
+- **Actualizar** — recarga KPIs y tabla de boletos.
+- **Importar** — modal para subir archivos `.xlsx` o `.csv` (modo combinar o reemplazar).
+- **Exportar Excel** y **Exportar CSV** — descarga con desglose de métodos de pago.
 
-Tabla de boletos con búsqueda en tiempo real.
+**Tabla de Registro de Boletos Físicos:**
+- Ocupa el **100% del ancho** del panel principal en su propio contenedor responsivo.
+- Ajuste automático de texto (`word-break` y `white-space: normal`) para columnas extensas (*Comprador, Carrera/Ciclo, Recolector*).
+- Valores numéricos, fechas y estados con etiquetas semáforo protegidos sin saltos de línea extraños.
+- Buscador reactivo en tiempo real por número de boleto, código, nombre o recolector.
 
 ### Nueva Venta
-- Autocompletado de alumno al escribir código/nombre (debounce 150ms).
-- Venta de 1 a 20 boletos en una operación.
-- Campo de "persona que recoge" por cada boleto.
-- Resumen visual de los boletos asignados tras confirmar.
+- Autocompletado reactivo de estudiante por código (6 cifras) o nombre (debounce 150ms).
+- Venta masiva de 1 a 20 boletos en una sola transacción asignando números correlativos.
+- Asignación de persona que recoge (referencial) por cada boleto emitido.
+- **Gestión Dinámica de Pagos:**
+  - Botón **"Agregar método de pago"** para desglosar múltiples abonos (ej. S/5 Efectivo + S/10 Plin).
+  - Métodos disponibles: `Efectivo`, `Yape` y `Plin`.
+  - Panel de resumen en vivo que calcula automáticamente: **Total pagado**, **Saldo pendiente** y el **Estado** resultante (`Pagado`, `Parcial` o `Separado`).
+- Resumen visual con desglose de boletos asignados tras confirmar la venta.
 
 ### Entrega de Polladas
-- Búsqueda por: número de boleto, código, DNI o nombre del recolector.
-- Muestra estado del boleto y alerta si tiene saldo pendiente.
-- Modal de confirmación con cobro opcional del saldo en puerta.
+- Búsqueda instantánea por número físico de boleto (#1 a #1000), código, DNI o nombre.
+- Alerta visual destacada si el boleto cuenta con saldo pendiente.
+- Modal de confirmación en puerta con opción de registrar el cobro del saldo (añadiéndolo automáticamente a los pagos) con fecha/hora registrada en **Hora Peruana (UTC-5)**.
 
 ### Editar Boleto
-- Misma búsqueda que la pantalla de Entrega.
-- Botón "Editar este Boleto" abre modal con todos los campos precargados.
-- Campos editables: código, nombre, carrera, ciclo, recolector, estado, precio, monto pagado, método de pago, ¿entregado?
-- Los resultados se actualizan automáticamente al guardar.
+- Búsqueda rápida de boletos registrados.
+- Modal de edición completo: modifica datos personales, asignación de recolector, estado de entrega física o precio.
+- **Edición Dinámica de Pagos:** Permite agregar o remover métodos de pago de un boleto existente, recalculando los totales al instante al guardar cambios.
 
 ---
 
@@ -395,54 +409,63 @@ Los datos sobreviven a reinicios y rebuilds del contenedor.
 Ejecutar **desde PowerShell local**:
 
 ```powershell
-# Archivos de backend
+# 1. Archivos principales del backend y modelos
 scp -i $env:USERPROFILE\.ssh\id_ed25519_vps `
   "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\app\main.py" `
+  "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\app\database.py" `
+  "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\app\models.py" `
   "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\app\schemas.py" `
   root@161.132.39.114:~/sistemas/sistema-tickets-polladas/app/
 
+# 2. Routers con la lógica de pagos y exportación
 scp -i $env:USERPROFILE\.ssh\id_ed25519_vps `
   "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\app\routers\tickets.py" `
+  "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\app\routers\eventos.py" `
   root@161.132.39.114:~/sistemas/sistema-tickets-polladas/app/routers/
 
-# Archivos de frontend
+# 3. Archivos de frontend (UI dinámica y estilos)
 scp -i $env:USERPROFILE\.ssh\id_ed25519_vps `
   "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\frontend\index.html" `
   "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\frontend\app.js" `
   "d:\Apps-gianmarcoax\2026_SIS_DECIMO\sistema-tickets-polladas\frontend\styles.css" `
   root@161.132.39.114:~/sistemas/sistema-tickets-polladas/frontend/
 
-# Reiniciar el contenedor
+# 4. Reiniciar el contenedor
 ssh -i $env:USERPROFILE\.ssh\id_ed25519_vps root@161.132.39.114 `
   "cd ~/sistemas/sistema-tickets-polladas && docker compose restart"
 ```
 
-> Si se agregan dependencias nuevas en `requirements.txt`, usar `docker compose up -d --build` en lugar de `restart`.
+> Al reiniciar, `database.py` aplicará automáticamente la migración de columna `pagos_detalle` sin tocar los datos existentes. Si se agregan paquetes a `requirements.txt`, usar `docker compose up -d --build` en lugar de `restart`.
 
 ---
 
 ## 11. Importar y Exportar datos
 
 ### Exportar
-Dashboard → **Exportar Excel** o **Exportar CSV** — descarga todos los boletos del evento activo.
+Dashboard → **Exportar Excel** o **Exportar CSV** — genera el reporte contable completo del evento activo.
 
-**Columnas del archivo exportado:**
+**Desglose Contable por Método (Denormalizado):**
+Si un boleto fue abonado con métodos mixtos (por ejemplo, S/ 5.00 en Efectivo y S/ 10.00 en Plin), el reporte genera **una fila independiente por cada pago realizado**. De esta forma:
+- Se puede aplicar un filtro o tabla dinámica por `Método de Pago` para cuadrar la caja física (Efectivo) por separado de la billetera virtual (Yape y Plin).
+- El saldo pendiente solo se imputa a la primera fila del boleto para no duplicar deudas al sumar la columna.
 
-| Columna | Ejemplo |
-|---|---|
-| Nº Boleto | 101 |
-| Código / DNI | 247358 |
-| Nombre Comprador | Juan Pérez |
-| Carrera | INGENIERIA DE SISTEMAS |
-| Ciclo | 10 |
-| Persona que Recoge | Pedro |
-| Estado | PAGADO |
-| Monto Total (S/) | 15.00 |
-| Monto Pagado (S/) | 15.00 |
-| Monto Pendiente (S/) | 0.00 |
-| Método de Pago | YAPE |
-| Entregado | Sí |
-| Fecha de Entrega | 2026-09-04 10:30:00 |
+**Columnas del reporte exportado:**
+
+| Columna | Ejemplo | Descripción |
+|---|---|---|
+| Nº Boleto | 101 | Identificador físico |
+| Código / DNI | 247358 | Identificador del estudiante |
+| Nombre Comprador | Juan Pérez | Nombre completo |
+| Carrera | INGENIERIA DE SISTEMAS | Escuela profesional |
+| Ciclo | 10 | Ciclo académico |
+| Persona que Recoge | Pedro | Referencial de entrega |
+| Estado | PAGADO | Semáforo de pago |
+| Monto Total (S/) | 15.00 | Costo total del boleto |
+| Monto Pagado (S/) | 5.00 | Monto correspondiente a ese método específico |
+| Monto Pendiente (S/) | 0.00 | Saldo restante por cancelar |
+| Método de Pago | EFECTIVO | Método del abono (`EFECTIVO`, `YAPE` o `PLIN`) |
+| Entregado | Sí | Si se entregó la vianda física |
+| Fecha de Entrega | 2026-09-04 10:30:00 | Hora peruana de entrega |
 
 ### Importar
 Dashboard → botón **Importar** → seleccionar archivo y modo.
@@ -452,7 +475,7 @@ Dashboard → botón **Importar** → seleccionar archivo y modo.
 - **Reemplazar todo**: borra todos los boletos del evento y los carga desde el archivo.
 
 **Flujo recomendado para sincronizar datos con la VPS:**
-1. Exportar el Excel actual como backup.
+1. Exportar el Excel actual como backup de seguridad.
 2. Editar con los datos actualizados.
 3. Importar en modo **Combinar**.
 
@@ -481,13 +504,13 @@ Dashboard → botón **Importar** → seleccionar archivo y modo.
 
 ## 14. Notas de Desarrollo
 
-- El frontend **no usa frameworks** — HTML + CSS + JS puro para máxima compatibilidad.
-- Sigue el patrón **Router → Schema → Model** estándar de FastAPI.
-- `reload=False` en uvicorn evita el problema de procesos duplicados que causaba errores `405 Method Not Allowed` en endpoints `PATCH`.
-- Los `StaticFiles` se montan **después** de los `include_router()` en `main.py` para que las rutas de la API tengan prioridad.
-- El autocompletado de estudiantes usa un debounce de 150ms sobre el endpoint `/estudiantes/buscar`.
-- La restricción única `(evento_id, numero_boleto)` en la tabla `tickets` impide duplicar boletos por accidente.
+- **Frontend sin dependencias pesadas:** HTML5 + CSS puro + JavaScript Vanilla para asegurar máxima velocidad y compatibilidad en dispositivos móviles.
+- **Zona Horaria de Perú (UTC-5):** Implementada mediante el helper `ahora_peru()` en el backend, garantizando que el registro de entregas físicas y pagos en puerta conserve siempre la hora local de Perú (`America/Lima`) sin importar la zona configurada en el servidor o contenedor.
+- **Soporte de Pagos Mixtos y Retrocompatibilidad:** La columna `pagos_detalle` almacena la lista JSON como fuente de la verdad, mientras que `monto_pagado` y `metodo_pago` se calculan dinámicamente como campos agregados para compatibilidad total con endpoints o reportes previos.
+- **Formato Numérico en Excel:** Se utiliza el formato universal `#,##0.00` en `openpyxl` para asegurar que las columnas monetarias sean reconocidas como números sumables en cualquier versión o idioma de Microsoft Excel.
+- **Modo Uvicorn:** `reload=False` en producción local y VPS para evitar procesos huérfanos que provocan errores `405 Method Not Allowed` en peticiones `PATCH`.
+- **Restricción de integridad única:** `(evento_id, numero_boleto)` previene la duplicación accidental de boletos físicos numerados.
 
 ---
 
-*Sistema de Gestión de Boletos — Documentación v2.0 — 2026 Décimo Semestre*
+*Sistema de Gestión de Boletos — Documentación v2.1 — Actualizado con Pagos Múltiples, Responsividad y Zona Horaria Perú*

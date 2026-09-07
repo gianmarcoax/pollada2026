@@ -1,6 +1,7 @@
 import csv
 import io
-from datetime import datetime
+import json
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from sqlalchemy import or_
@@ -17,6 +18,48 @@ from app.schemas import (
 from app.auth import get_current_user
 
 router = APIRouter(prefix="/tickets", tags=["Tickets y Ventas"])
+
+# ─────────────── Zona horaria Perú ───────────────
+PERU_TZ = timezone(timedelta(hours=-5))
+
+def ahora_peru() -> datetime:
+    """Devuelve la fecha/hora actual en hora de Perú (UTC-5) sin información de zona."""
+    return datetime.now(PERU_TZ).replace(tzinfo=None)
+
+# ─────────────── Helpers de pagos ───────────────
+
+def _calcular_pagos(pagos_list: list) -> tuple:
+    """
+    Dada una lista de {monto, metodo}, devuelve:
+      (monto_total_pagado, metodo_derivado, pagos_json_str)
+    metodo_derivado = el único método si todos son iguales, o 'mixto' si hay varios.
+    """
+    if not pagos_list:
+        return 0.0, "ninguno", "[]"
+    total = round(sum(float(p.get("monto", 0)) for p in pagos_list), 2)
+    metodos = list({p.get("metodo", "ninguno") for p in pagos_list if p.get("metodo") not in ("ninguno", None, "")})
+    if len(metodos) == 0:
+        metodo = "ninguno"
+    elif len(metodos) == 1:
+        metodo = metodos[0]
+    else:
+        metodo = "mixto"
+    return total, metodo, json.dumps(pagos_list)
+
+def _auto_estado(monto_pagado: float, precio_unitario: float) -> str:
+    """Calcula el estado según los montos."""
+    if monto_pagado <= 0:
+        return "separado"
+    if monto_pagado >= precio_unitario:
+        return "pagado"
+    return "parcialmente_pagado"
+
+def _pagos_from_ticket(ticket: Ticket) -> list:
+    """Parsea pagos_detalle del ticket de forma segura."""
+    try:
+        return json.loads(ticket.pagos_detalle or "[]")
+    except Exception:
+        return []
 
 # ─────────────── Helpers de parsing ───────────────
 
@@ -105,10 +148,11 @@ def _row_to_ticket_data(row: dict, evento_id: int) -> dict:
         return None  # fila inválida
 
     monto_total  = _parse_float(get(["monto total (s/)", "monto_total", "total"]), 15.0)
-    monto_pagado = _parse_float(get(["monto pagado (s/)", "monto_pagado", "pagado"]), 0.0)
+    monto_pagado = _parse_float(get(["monto pago (s/)", "monto pagado (s/)", "monto_pagado", "monto_pago", "pagado", "pago"]), 0.0)
     monto_pend   = max(0.0, round(monto_total - monto_pagado, 2))
     entregado    = _parse_bool(get(["entregado"]))
     fecha_entrega = _parse_fecha(get(["fecha de entrega", "fecha_hora_entrega"]))
+    metodo       = _parse_metodo(get(["método de pago", "metodo de pago", "metodo_pago", "método", "metodo"]))
 
     return dict(
         numero_boleto    = numero,
@@ -123,9 +167,12 @@ def _row_to_ticket_data(row: dict, evento_id: int) -> dict:
         monto_total      = monto_total,
         monto_pagado     = min(monto_pagado, monto_total),
         monto_pendiente  = monto_pend,
-        metodo_pago      = _parse_metodo(get(["método de pago", "metodo de pago", "metodo_pago", "método"])),
+        metodo_pago      = metodo,
+        pagos_detalle    = "[]",
         entregado        = entregado,
         fecha_hora_entrega = fecha_entrega,
+        _pago_monto      = monto_pagado,
+        _pago_metodo     = metodo,
     )
 
 
@@ -167,14 +214,42 @@ def importar_tickets(
     if not rows:
         raise HTTPException(status_code=400, detail="El archivo no contiene filas de datos.")
 
-    # Parsear todas las filas
-    ticket_data_list = []
+    # Agrupar filas por numero_boleto para consolidar pagos denormalizados
+    tickets_dict = {}
     filas_invalidas = 0
     for row in rows:
         data = _row_to_ticket_data(row, evento_id)
         if data is None:
             filas_invalidas += 1
             continue
+        num = data["numero_boleto"]
+        p_monto = data.pop("_pago_monto", 0.0)
+        p_metodo = data.pop("_pago_metodo", "ninguno")
+
+        if num not in tickets_dict:
+            data["_pagos"] = []
+            if p_monto > 0 or p_metodo != "ninguno":
+                data["_pagos"].append({"monto": p_monto, "metodo": p_metodo})
+            tickets_dict[num] = data
+        else:
+            if p_monto > 0 or p_metodo != "ninguno":
+                tickets_dict[num]["_pagos"].append({"monto": p_monto, "metodo": p_metodo})
+            if data["entregado"]:
+                tickets_dict[num]["entregado"] = True
+                if data["fecha_hora_entrega"]:
+                    tickets_dict[num]["fecha_hora_entrega"] = data["fecha_hora_entrega"]
+
+    # Consolidar pagos y estados
+    ticket_data_list = []
+    for num, data in tickets_dict.items():
+        pagos = data.pop("_pagos", [])
+        if pagos:
+            tot, met, p_json = _calcular_pagos(pagos)
+            data["monto_pagado"] = min(tot, data["monto_total"])
+            data["monto_pendiente"] = max(0.0, data["monto_total"] - data["monto_pagado"])
+            data["metodo_pago"] = met
+            data["pagos_detalle"] = p_json
+            data["estado"] = _auto_estado(data["monto_pagado"], data["monto_total"])
         ticket_data_list.append(data)
 
     if not ticket_data_list:
@@ -293,38 +368,52 @@ def registrar_venta_multiple(
         )
 
     # Cálculos financieros por boleto
-    total_boletos = len(venta_in.boletos)
+    total_boletos  = len(venta_in.boletos)
     precio_unitario = venta_in.precio_unitario if venta_in.precio_unitario > 0 else 15.0
-    
-    monto_total_por_boleto = precio_unitario
-    monto_pagado_por_boleto = venta_in.monto_pagado_total / total_boletos if total_boletos > 0 else 0.0
-    
-    # Ajustar por seguridad
-    if monto_pagado_por_boleto > monto_total_por_boleto:
-        monto_pagado_por_boleto = monto_total_por_boleto
 
-    monto_pendiente_por_boleto = max(0.0, monto_total_por_boleto - monto_pagado_por_boleto)
+    # ── Construir lista de pagos por boleto ──
+    if venta_in.pagos:
+        # Modo nuevo: lista dinámica de pagos — distribuir proporcionalmente por boleto
+        pagos_base = [{"monto": round(p.monto / total_boletos, 2), "metodo": p.metodo}
+                      for p in venta_in.pagos]
+    else:
+        # Modo legacy: campos monto_pagado_total + metodo_pago
+        monto_por_boleto = round(venta_in.monto_pagado_total / total_boletos, 2) if total_boletos > 0 else 0.0
+        monto_por_boleto = min(monto_por_boleto, precio_unitario)
+        if monto_por_boleto > 0:
+            pagos_base = [{"monto": monto_por_boleto, "metodo": venta_in.metodo_pago or "ninguno"}]
+        else:
+            pagos_base = []
+
+    monto_pagado_base, metodo_base, pagos_json = _calcular_pagos(pagos_base)
+    monto_pendiente_base = max(0.0, precio_unitario - monto_pagado_base)
+
+    # Auto-estado si no se especificó o no coincide con montos
+    estado_final = venta_in.estado
+    if not estado_final or estado_final not in ("pagado", "parcialmente_pagado", "separado"):
+        estado_final = _auto_estado(monto_pagado_base, precio_unitario)
 
     tickets_creados = []
     for item in venta_in.boletos:
         recolector = item.nombre_recolector.strip() if (item.nombre_recolector and item.nombre_recolector.strip()) else venta_in.nombre_alumno.strip()
-        
+
         ticket = Ticket(
-            numero_boleto=item.numero_boleto,
-            evento_id=venta_in.evento_id,
-            codigo_alumno=venta_in.codigo_alumno.strip(),
-            nombre_alumno=venta_in.nombre_alumno.strip(),
-            carrera=venta_in.carrera.strip() if venta_in.carrera else "INGENIERIA DE SISTEMAS",
-            ciclo=venta_in.ciclo.strip() if venta_in.ciclo else "1",
-            nombre_recolector=recolector,
-            estado=venta_in.estado,
-            precio_unitario=precio_unitario,
-            monto_total=monto_total_por_boleto,
-            monto_pagado=monto_pagado_por_boleto,
-            monto_pendiente=monto_pendiente_por_boleto,
-            metodo_pago=venta_in.metodo_pago or "ninguno",
-            entregado=False,
-            fecha_hora_entrega=None
+            numero_boleto     = item.numero_boleto,
+            evento_id         = venta_in.evento_id,
+            codigo_alumno     = venta_in.codigo_alumno.strip(),
+            nombre_alumno     = venta_in.nombre_alumno.strip(),
+            carrera           = venta_in.carrera.strip() if venta_in.carrera else "INGENIERIA DE SISTEMAS",
+            ciclo             = venta_in.ciclo.strip() if venta_in.ciclo else "1",
+            nombre_recolector = recolector,
+            estado            = estado_final,
+            precio_unitario   = precio_unitario,
+            monto_total       = precio_unitario,
+            monto_pagado      = monto_pagado_base,
+            monto_pendiente   = monto_pendiente_base,
+            metodo_pago       = metodo_base,
+            pagos_detalle     = pagos_json,
+            entregado         = False,
+            fecha_hora_entrega= None,
         )
         db.add(ticket)
         tickets_creados.append(ticket)
@@ -332,6 +421,8 @@ def registrar_venta_multiple(
     db.commit()
     for t in tickets_creados:
         db.refresh(t)
+        # Pydantic necesita pagos_detalle como lista, no como string JSON
+        t.pagos_detalle = json.loads(t.pagos_detalle or "[]")
 
     return tickets_creados
 
@@ -408,25 +499,25 @@ def confirmar_entrega_boleto(
             detail=f"El boleto físico #{datos.numero_boleto} ya fue entregado previamente el {fecha_str}."
         )
 
-    # Si se pagó un saldo adicional durante la entrega
+    # Si se cobró saldo adicional en la entrega → se agrega como nuevo pago
     if datos.monto_cobrado_adicional and datos.monto_cobrado_adicional > 0:
-        ticket.monto_pagado += datos.monto_cobrado_adicional
-        if ticket.monto_pagado >= ticket.monto_total:
-            ticket.monto_pagado = ticket.monto_total
-            ticket.monto_pendiente = 0.0
-            ticket.estado = "pagado"
-        else:
-            ticket.monto_pendiente = max(0.0, ticket.monto_total - ticket.monto_pagado)
-            ticket.estado = "parcialmente_pagado"
+        pagos = _pagos_from_ticket(ticket)
+        metodo_entrega = datos.metodo_pago_entrega or "efectivo"
+        pagos.append({"monto": round(datos.monto_cobrado_adicional, 2), "metodo": metodo_entrega})
+        monto_pagado, metodo, pagos_json = _calcular_pagos(pagos)
+        monto_pagado = min(monto_pagado, ticket.monto_total)
+        ticket.pagos_detalle  = pagos_json
+        ticket.monto_pagado   = monto_pagado
+        ticket.monto_pendiente= max(0.0, ticket.monto_total - monto_pagado)
+        ticket.metodo_pago    = metodo
+        ticket.estado         = _auto_estado(monto_pagado, ticket.monto_total)
 
-    if datos.metodo_pago_entrega and datos.metodo_pago_entrega != "ninguno":
-        ticket.metodo_pago = datos.metodo_pago_entrega
-
-    ticket.entregado = True
-    ticket.fecha_hora_entrega = datetime.utcnow()
+    ticket.entregado           = True
+    ticket.fecha_hora_entrega  = ahora_peru()  # ← Hora Perú (UTC-5)
 
     db.commit()
     db.refresh(ticket)
+    ticket.pagos_detalle = json.loads(ticket.pagos_detalle or "[]")
     return ticket
 
 @router.get("", response_model=List[TicketOut])
@@ -487,56 +578,65 @@ def editar_ticket(
             detail=f"No se encontró ningún boleto con ID #{ticket_id}."
         )
 
-    # Aplicar cambios de datos generales
-    if datos.nombre_alumno is not None:
-        ticket.nombre_alumno = datos.nombre_alumno.strip()
-    if datos.codigo_alumno is not None:
-        ticket.codigo_alumno = datos.codigo_alumno.strip()
-    if datos.carrera is not None:
-        ticket.carrera = datos.carrera.strip()
-    if datos.ciclo is not None:
-        ticket.ciclo = datos.ciclo.strip()
-    if datos.nombre_recolector is not None:
-        ticket.nombre_recolector = datos.nombre_recolector.strip()
-    if datos.metodo_pago is not None:
+    # ── Datos generales ──
+    if datos.nombre_alumno     is not None: ticket.nombre_alumno     = datos.nombre_alumno.strip()
+    if datos.codigo_alumno     is not None: ticket.codigo_alumno     = datos.codigo_alumno.strip()
+    if datos.carrera           is not None: ticket.carrera           = datos.carrera.strip()
+    if datos.ciclo             is not None: ticket.ciclo             = datos.ciclo.strip()
+    if datos.nombre_recolector is not None: ticket.nombre_recolector = datos.nombre_recolector.strip()
+
+    # ── Lista de pagos (nuevo) ──
+    if datos.pagos is not None:
+        pagos_list = [{"monto": p.monto, "metodo": p.metodo} for p in datos.pagos]
+        precio = datos.precio_unitario if datos.precio_unitario is not None else ticket.precio_unitario
+        monto_pagado, metodo, pagos_json = _calcular_pagos(pagos_list)
+        monto_pagado = min(monto_pagado, precio)
+        ticket.precio_unitario  = precio
+        ticket.monto_total      = precio
+        ticket.pagos_detalle    = pagos_json
+        ticket.monto_pagado     = monto_pagado
+        ticket.monto_pendiente  = max(0.0, precio - monto_pagado)
+        ticket.metodo_pago      = metodo
+        # Auto-estado si no se forzó uno
+        if datos.estado is None:
+            ticket.estado = _auto_estado(monto_pagado, precio)
+
+    # ── Campos financieros legacy (si no vino 'pagos') ──
+    elif datos.monto_pagado is not None or datos.precio_unitario is not None:
+        precio_nuevo  = datos.precio_unitario if datos.precio_unitario is not None else ticket.precio_unitario
+        pagado_nuevo  = datos.monto_pagado    if datos.monto_pagado    is not None else ticket.monto_pagado
+        pagado_nuevo  = min(pagado_nuevo, precio_nuevo)
+        ticket.precio_unitario  = precio_nuevo
+        ticket.monto_total      = precio_nuevo
+        ticket.monto_pagado     = pagado_nuevo
+        ticket.monto_pendiente  = max(0.0, precio_nuevo - pagado_nuevo)
+        if datos.estado is None:
+            ticket.estado = _auto_estado(pagado_nuevo, precio_nuevo)
+        # Actualizar pagos_detalle legacy
+        if datos.metodo_pago:
+            ticket.metodo_pago = datos.metodo_pago
+            if pagado_nuevo > 0:
+                ticket.pagos_detalle = json.dumps([{"monto": pagado_nuevo, "metodo": datos.metodo_pago}])
+
+    elif datos.metodo_pago is not None:
         ticket.metodo_pago = datos.metodo_pago
 
-    # Actualizar campos financieros y recalcular
-    precio_nuevo = datos.precio_unitario if datos.precio_unitario is not None else ticket.precio_unitario
-    pagado_nuevo = datos.monto_pagado if datos.monto_pagado is not None else ticket.monto_pagado
-
-    if datos.precio_unitario is not None or datos.monto_pagado is not None:
-        ticket.precio_unitario = precio_nuevo
-        ticket.monto_total = precio_nuevo
-        # Clamp: no puede pagar más de lo que vale
-        ticket.monto_pagado = min(pagado_nuevo, precio_nuevo)
-        ticket.monto_pendiente = max(0.0, precio_nuevo - ticket.monto_pagado)
-
-        # Recalcular estado automáticamente si no se especificó uno nuevo
-        if datos.estado is None:
-            if ticket.monto_pendiente == 0.0:
-                ticket.estado = "pagado"
-            elif ticket.monto_pagado > 0.0:
-                ticket.estado = "parcialmente_pagado"
-            else:
-                ticket.estado = "separado"
-
-    # Estado explícito del usuario (tiene prioridad)
+    # ── Estado explícito tiene prioridad ──
     if datos.estado is not None:
         ticket.estado = datos.estado
 
-    # Estado de entrega
+    # ── Estado de entrega ──
     if datos.entregado is not None:
         ticket.entregado = datos.entregado
         if datos.entregado and ticket.fecha_hora_entrega is None:
-            ticket.fecha_hora_entrega = datetime.utcnow()
+            ticket.fecha_hora_entrega = ahora_peru()  # ← Hora Perú
         elif not datos.entregado:
             ticket.fecha_hora_entrega = None
 
-    # Fecha de entrega explícita (override manual)
     if datos.fecha_hora_entrega is not None:
         ticket.fecha_hora_entrega = datos.fecha_hora_entrega
 
     db.commit()
     db.refresh(ticket)
+    ticket.pagos_detalle = json.loads(ticket.pagos_detalle or "[]")
     return ticket

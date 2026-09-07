@@ -1,5 +1,5 @@
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 # En Docker usa la ruta del volumen; en local usa el archivo del directorio actual
@@ -21,3 +21,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def run_migrations():
+    """
+    Aplica columnas nuevas a tablas existentes sin perder datos.
+    SQLite no soporta ALTER TABLE DROP COLUMN, pero sí ADD COLUMN.
+    Se ejecuta automáticamente en el arranque de la app.
+    """
+    migrations = [
+        # tabla, columna, definición SQL
+        ("tickets", "pagos_detalle", "TEXT NOT NULL DEFAULT '[]'"),
+    ]
+    with engine.connect() as conn:
+        for table, column, definition in migrations:
+            # Verificar si la columna ya existe
+            result = conn.execute(text(f"PRAGMA table_info({table})"))
+            existing_cols = [row[1] for row in result.fetchall()]
+            if column not in existing_cols:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+                conn.commit()
+                print(f"[Migration] Columna '{column}' agregada a tabla '{table}'")

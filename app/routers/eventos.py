@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
@@ -23,8 +24,25 @@ def calcular_kpis_evento(evento: Evento, db: Session) -> EventoKPIsOut:
     separados = sum(1 for t in tickets if t.estado == "separado")
     entregados = sum(1 for t in tickets if t.entregado)
 
-    total_recaudado = sum(t.monto_pagado for t in tickets)
-    total_pendiente = sum(t.monto_pendiente for t in tickets)
+    total_recaudado = round(sum(t.monto_pagado for t in tickets), 2)
+    total_pendiente = round(sum(t.monto_pendiente for t in tickets), 2)
+
+    # Desglose por método de pago (leyendo pagos_detalle JSON)
+    total_yape = total_efectivo = total_plin = 0.0
+    for t in tickets:
+        try:
+            pagos = json.loads(t.pagos_detalle or "[]")
+        except Exception:
+            pagos = []
+        # Fallback: si no hay pagos_detalle, usar monto_pagado + metodo_pago
+        if not pagos and t.monto_pagado > 0:
+            pagos = [{"monto": t.monto_pagado, "metodo": t.metodo_pago}]
+        for p in pagos:
+            m = p.get("metodo", "ninguno")
+            v = float(p.get("monto", 0))
+            if m == "yape":      total_yape     += v
+            elif m == "efectivo": total_efectivo += v
+            elif m == "plin":    total_plin     += v
 
     # Cobertura de estudiantes matriculados (EstudiantesMatriculados.xlsx)
     total_matriculados = db.query(EstudianteMatriculado).count()
@@ -49,6 +67,9 @@ def calcular_kpis_evento(evento: Evento, db: Session) -> EventoKPIsOut:
         entregados=entregados,
         total_recaudado=round(total_recaudado, 2),
         total_pendiente=round(total_pendiente, 2),
+        total_yape=round(total_yape, 2),
+        total_efectivo=round(total_efectivo, 2),
+        total_plin=round(total_plin, 2),
         estudiantes_matriculados_total=total_matriculados,
         estudiantes_matriculados_con_boleto=matriculados_con_boleto,
         porcentaje_cobertura_matriculados=porcentaje_cobertura
@@ -119,8 +140,8 @@ def exportar_tickets_excel(
 
     headers = [
         "Nº Boleto", "Código / DNI", "Nombre Comprador", "Carrera", "Ciclo",
-        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pagado (S/)",
-        "Monto Pendiente (S/)", "Método de Pago", "Entregado", "Fecha de Entrega"
+        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pago (S/)",
+        "Método de Pago", "Entregado", "Fecha de Entrega"
     ]
     ws.append(headers)
 
@@ -135,29 +156,38 @@ def exportar_tickets_excel(
         entregado_str = "Sí" if t.entregado else "No"
         recolector_str = t.nombre_recolector if t.nombre_recolector else t.nombre_alumno
 
-        ws.append([
-            t.numero_boleto,
-            t.codigo_alumno,
-            t.nombre_alumno,
-            t.carrera,
-            t.ciclo,
-            recolector_str,
-            t.estado.upper(),
-            t.monto_total,
-            t.monto_pagado,
-            t.monto_pendiente,
-            t.metodo_pago.upper(),
-            entregado_str,
-            fecha_str
-        ])
+        # Obtener lista de pagos — una fila por cada método
+        try:
+            pagos = json.loads(t.pagos_detalle or "[]")
+        except Exception:
+            pagos = []
+        if not pagos:
+            # Fallback para tickets sin pagos_detalle (datos viejos)
+            pagos = [{"monto": t.monto_pagado, "metodo": t.metodo_pago}]
+
+        for pago in pagos:
+            ws.append([
+                t.numero_boleto,
+                t.codigo_alumno,
+                t.nombre_alumno,
+                t.carrera,
+                t.ciclo,
+                recolector_str,
+                t.estado.upper(),
+                t.monto_total,
+                round(float(pago.get("monto", 0)), 2),
+                str(pago.get("metodo", "ninguno")).upper(),
+                entregado_str,
+                fecha_str,
+            ])
 
     for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(headers)):
         for cell in row:
             cell.border = thin_border
             if cell.column in [1, 2, 5, 7, 11, 12]:
                 cell.alignment = Alignment(horizontal="center")
-            elif cell.column in [8, 9, 10]:
-                cell.number_format = 'S/ #,##0.00'
+            elif cell.column in [8, 9]:
+                cell.number_format = '#,##0.00'
 
     for col in ws.columns:
         max_len = max(len(str(cell.value or '')) for cell in col)
@@ -200,8 +230,8 @@ def exportar_tickets_csv(
 
     writer.writerow([
         "Nº Boleto", "Código / DNI", "Nombre Comprador", "Carrera", "Ciclo",
-        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pagado (S/)",
-        "Monto Pendiente (S/)", "Método de Pago", "Entregado", "Fecha de Entrega"
+        "Persona que Recoge", "Estado", "Monto Total (S/)", "Monto Pago (S/)",
+        "Método de Pago", "Entregado", "Fecha de Entrega"
     ])
 
     for t in tickets:
@@ -209,21 +239,28 @@ def exportar_tickets_csv(
         entregado_str = "Sí" if t.entregado else "No"
         recolector_str = t.nombre_recolector if t.nombre_recolector else t.nombre_alumno
 
-        writer.writerow([
-            t.numero_boleto,
-            t.codigo_alumno,
-            t.nombre_alumno,
-            t.carrera,
-            t.ciclo,
-            recolector_str,
-            t.estado.upper(),
-            f"{t.monto_total:.2f}",
-            f"{t.monto_pagado:.2f}",
-            f"{t.monto_pendiente:.2f}",
-            t.metodo_pago.upper(),
-            entregado_str,
-            fecha_str
-        ])
+        try:
+            pagos = json.loads(t.pagos_detalle or "[]")
+        except Exception:
+            pagos = []
+        if not pagos:
+            pagos = [{"monto": t.monto_pagado, "metodo": t.metodo_pago}]
+
+        for pago in pagos:
+            writer.writerow([
+                t.numero_boleto,
+                t.codigo_alumno,
+                t.nombre_alumno,
+                t.carrera,
+                t.ciclo,
+                recolector_str,
+                t.estado.upper(),
+                f"{t.monto_total:.2f}",
+                f"{float(pago.get('monto', 0)):.2f}",
+                str(pago.get('metodo', 'ninguno')).upper(),
+                entregado_str,
+                fecha_str,
+            ])
 
     filename = f"reporte_boletos_{evento.nombre.replace(' ', '_')}.csv"
     return Response(

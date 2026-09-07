@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -47,7 +47,9 @@ class Ticket(Base):
     monto_total = Column(Float, default=15.0, nullable=False)
     monto_pagado = Column(Float, default=0.0, nullable=False)
     monto_pendiente = Column(Float, default=15.0, nullable=False)
-    metodo_pago = Column(String(50), default="ninguno", nullable=False) # yape | plin | efectivo | ninguno
+    metodo_pago = Column(String(50), default="ninguno", nullable=False) # yape | plin | efectivo | ninguno | mixto
+    # Lista JSON de pagos individuales: [{"monto": 5.0, "metodo": "efectivo"}, ...]
+    pagos_detalle = Column(Text, default="[]", nullable=False)
 
     entregado = Column(Boolean, default=False, nullable=False)
     fecha_hora_entrega = Column(DateTime, nullable=True, default=None)

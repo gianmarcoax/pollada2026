@@ -5,13 +5,16 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
-from app.database import engine, Base, get_db, SessionLocal
+from app.database import engine, Base, get_db, SessionLocal, run_migrations
 from app.models import Ticket, EstudianteMatriculado
 from app.routers import auth, eventos, tickets, estudiantes
 from seed import seed_database
 
 # Crear las tablas en la base de datos si no existen
 Base.metadata.create_all(bind=engine)
+
+# Aplicar migraciones (columnas nuevas) sin perder datos existentes
+run_migrations()
 
 # Auto-poblar si la tabla de estudiantes está vacía (ideal para despliegue en la nube / Render)
 try:

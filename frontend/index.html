@@ -179,22 +179,6 @@
               <h3 id="kpi-vendidos" class="kpi-value">0</h3>
             </div>
           </div>
-
-          <div class="kpi-card glass-panel card-parciales">
-            <div class="kpi-icon"><i class="fa-solid fa-adjust"></i></div>
-            <div class="kpi-info">
-              <span class="kpi-label">Parcialmente Pagados</span>
-              <h3 id="kpi-parciales" class="kpi-value">0</h3>
-            </div>
-          </div>
-
-          <div class="kpi-card glass-panel card-entregados">
-            <div class="kpi-icon"><i class="fa-solid fa-utensils"></i></div>
-            <div class="kpi-info">
-              <span class="kpi-label">Polladas Entregadas</span>
-              <h3 id="kpi-entregados" class="kpi-value">0</h3>
-            </div>
-          </div>
         </div>
 
         <!-- Lista de Tickets del Evento -->
@@ -304,35 +288,27 @@
 
               <hr class="form-divider">
 
-              <!-- Estado de Pago, Monto y Método -->
-              <div class="form-group">
-                <label for="venta-estado">Estado de la Venta</label>
-                <select id="venta-estado" class="form-control" required>
-                  <option value="pagado">Pagado (100% Cancelado)</option>
-                  <option value="parcialmente_pagado">Parcialmente Pagado (Adelanto)</option>
-                  <option value="separado">Separado (Sin Pago por ahora)</option>
-                </select>
-              </div>
 
-              <div class="form-row-2">
-                <div class="form-group">
-                  <label for="venta-precio-unitario">Precio Unitario (S/)</label>
-                  <input type="number" step="0.5" id="venta-precio-unitario" class="form-control" value="15.00" required>
-                </div>
-                <div class="form-group">
-                  <label for="venta-monto-pagado">Monto Pagado Total (S/)</label>
-                  <input type="number" step="0.5" id="venta-monto-pagado" class="form-control" value="15.00" required>
-                </div>
+              <!-- ─── Sección de Pagos Dinámicos ─── -->
+              <hr class="form-divider">
+              <div class="form-group">
+                <label>Precio Unitario (S/)</label>
+                <input type="number" step="0.5" id="venta-precio-unitario" class="form-control" value="15.00" required>
               </div>
 
               <div class="form-group">
-                <label for="venta-metodo-pago">Método de Pago</label>
-                <select id="venta-metodo-pago" class="form-control" required>
-                  <option value="efectivo">Efectivo</option>
-                  <option value="yape">Yape</option>
-                  <option value="plin">Plin</option>
-                  <option value="ninguno">Ninguno (Separado)</option>
-                </select>
+                <label>Pagos registrados <span style="color:var(--text-muted);font-size:.8rem">(agrega uno por método)</span></label>
+                <div id="venta-pagos-container"></div>
+                <button type="button" id="btn-agregar-pago-venta" class="btn btn-secondary btn-sm mt-2">
+                  <i class="fa-solid fa-plus"></i> Agregar método de pago
+                </button>
+              </div>
+
+              <!-- Resumen en tiempo real -->
+              <div class="pagos-resumen" id="venta-pagos-resumen">
+                <span>Total pagado: <strong id="venta-total-pagado">S/ 0.00</strong></span>
+                <span class="pagos-pendiente">Pendiente: <strong id="venta-total-pendiente">S/ 0.00</strong></span>
+                <span class="pagos-estado-preview" id="venta-estado-preview">Estado: Separado</span>
               </div>
 
               <button type="submit" id="btn-registrar-venta" class="btn btn-emerald btn-block mt-4">
@@ -623,31 +599,23 @@
         <!-- Datos financieros -->
         <p class="section-label" style="color:var(--text-muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:.5rem 0 .25rem">Datos de Pago</p>
         <div class="form-group">
-          <label for="edit-estado">Estado de Pago</label>
-          <select id="edit-estado" class="form-control">
-            <option value="pagado">Pagado (100% Cancelado)</option>
-            <option value="parcialmente_pagado">Parcialmente Pagado (Adelanto)</option>
-            <option value="separado">Separado (Sin Pago)</option>
-          </select>
+          <label for="edit-precio">Precio Unitario (S/)</label>
+          <input type="number" step="0.5" min="0" id="edit-precio" class="form-control" value="15.00">
         </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label for="edit-precio">Precio Unitario (S/)</label>
-            <input type="number" step="0.5" min="0" id="edit-precio" class="form-control">
-          </div>
-          <div class="form-group">
-            <label for="edit-monto-pagado">Monto Pagado (S/)</label>
-            <input type="number" step="0.5" min="0" id="edit-monto-pagado" class="form-control">
-          </div>
-        </div>
+
         <div class="form-group">
-          <label for="edit-metodo-pago">Método de Pago</label>
-          <select id="edit-metodo-pago" class="form-control">
-            <option value="efectivo">Efectivo</option>
-            <option value="yape">Yape</option>
-            <option value="plin">Plin</option>
-            <option value="ninguno">Ninguno (Separado)</option>
-          </select>
+          <label>Pagos registrados <span style="color:var(--text-muted);font-size:.8rem">(agrega uno por método)</span></label>
+          <div id="edit-pagos-container"></div>
+          <button type="button" id="btn-agregar-pago-edit" class="btn btn-secondary btn-sm mt-2">
+            <i class="fa-solid fa-plus"></i> Agregar método de pago
+          </button>
+        </div>
+
+        <!-- Resumen en tiempo real para modal editar -->
+        <div class="pagos-resumen" id="edit-pagos-resumen">
+          <span>Total pagado: <strong id="edit-total-pagado">S/ 0.00</strong></span>
+          <span class="pagos-pendiente">Pendiente: <strong id="edit-total-pendiente">S/ 0.00</strong></span>
+          <span class="pagos-estado-preview" id="edit-estado-preview">Estado: Separado</span>
         </div>
 
         <hr class="form-divider">
